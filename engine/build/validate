@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""검증기(엔진) — 완료는 여기서 판정한다. 티켓 스키마·VERSION·outputs 존재를 보고,
+domain/validate.py 가 있으면 같은 인수로 호출해 결과를 합친다(도메인 규칙은 거기에).
+사용: build/validate [--all] [--ticket T-xxxxxx] [--file path ...]
+종료코드 0 = 통과, 1 = 오류 있음."""
+from __future__ import annotations
+import re, sys, subprocess
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import *  # noqa
+
+E: list[str] = []
+W: list[str] = []
+
+
+def err(f, msg): E.append(f"{rel(f)}: {msg}")
+def warn(f, msg): W.append(f"{rel(f)}: {msg}")
+
+
+def validate_ticket(f: Path):
+    try:
+        t = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        return err(f, f"YAML 오류: {e}")
+    for k in ("id", "type", "title", "goal", "inputs", "outputs", "dod", "limits", "created"):
+        if k not in t:
+            err(f, f"티켓 필드 누락: {k}")
+    if t.get("id") != f.stem:
+        err(f, f"id({t.get('id')}) ≠ 파일명({f.stem})")
+    if t.get("type") not in TICKET_TYPES:
+        err(f, f"type 값 오류: {t.get('type')} (허용: {TICKET_TYPES})")
+    if not t.get("outputs"):
+        err(f, "outputs 비어 있음")
+    protected = (".claude/", "build/", ".github/", "STATUS.md", "VERSION", "ENGINE_VERSION", "tickets/")
+    if t.get("type") != "process":
+        for o in t.get("outputs") or []:
+            if str(o).startswith(protected):
+                err(f, f"outputs 경로 불허: {o} (process 티켓만 가능)")
+    kb = int((t.get("limits") or {}).get("read_kb") or 60)
+    total = 0
+    for i in t.get("inputs") or []:
+        p = ROOT / str(i).split("#")[0]
+        if p.exists() and p.is_file():
+            total += p.stat().st_size
+    if total > kb * 1024:
+        err(f, f"inputs 합계 {total//1024}KB > read_kb {kb}KB — 티켓을 쪼개거나 extract 로")
+    ids = {x["id"] for x in all_tickets()}
+    for b in t.get("blocked_by") or []:
+        if b not in ids:
+            err(f, f"blocked_by 참조 없음: {b}")
+
+
+def validate_version():
+    for name in ("VERSION",):
+        p = ROOT / name
+        if not p.exists():
+            err(p, "없음"); continue
+        v = p.read_text(encoding="utf-8").strip()
+        if not re.match(r"^\d+\.\d+\.\d+(-[a-z0-9.]+)?$", v):
+            err(p, f"semver 아님: {v}")
+
+
+def main(argv):
+    files, ticket, do_all = [], None, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--all":
+            do_all = True
+        elif a == "--ticket":
+            ticket = argv[i + 1]; i += 1
+        elif a == "--file":
+            files.append(Path(argv[i + 1])); i += 1
+        else:
+            files.append(Path(a))
+        i += 1
+    if ticket:
+        t = load_ticket(ticket)
+        validate_ticket(Path(t["_path"]))
+        for o in t.get("outputs") or []:
+            if not (ROOT / o).exists():
+                err(ROOT / o, "outputs 파일이 만들어지지 않음")
+    elif do_all or not files:
+        for st in TICKET_STATES:
+            for f in sorted((ROOT / "tickets" / st).glob("*.yaml")) if (ROOT / "tickets" / st).exists() else []:
+                validate_ticket(f)
+        validate_version()
+    else:
+        for f in files:
+            if rel(f).startswith("tickets/") and f.suffix == ".yaml":
+                validate_ticket(f)
+    for w in W:
+        print("권고 " + w)
+    for e in E:
+        print("오류 " + e)
+    print(f"validate(engine): 오류 {len(E)} / 권고 {len(W)}")
+    rc = 1 if E else 0
+    dom = ROOT / "domain" / "validate.py"
+    if dom.exists():
+        r = subprocess.run([sys.executable, str(dom), *argv], cwd=ROOT)
+        rc = rc or r.returncode
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

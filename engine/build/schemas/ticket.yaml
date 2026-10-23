@@ -1,0 +1,26 @@
+id: T-000000              # build/new_ticket 이 해시로 발급
+type: card                # card | problem | review | change | process | source | smoke
+title: 민법 — 대상청구권 카드 + 문제 1
+goal: >-
+  한 문단. 무엇을 만들고 어떤 상태가 되면 끝인가.
+issue: ""                 # GitHub Issue 번호 (#12) 있으면
+priority: 2               # 1 급함 / 2 보통 / 3 나중
+inputs:                   # 읽어도 되는 파일(상대경로). 합계 limits.read_kb 이하
+  - legacy/민법_V6.3.json#05
+  - sources/prec/2013다7769.json
+  - build/schemas/card.md
+  - build/schemas/problem.md
+outputs:                  # 써도 되는 파일. 이 밖은 훅이 막음
+  - cards/민법/MIN-05A.md
+  - problems/민법/MIN-05A-P1.md
+dod: [schema, source-exists, problem>=1, keywords>=3]
+limits: {read_kb: 60, max_turns: 40}
+blocked_by: []            # 이 티켓들이 done 이어야 ready
+blocks: []
+parent: ""
+discovered_from: ""
+claim: {by: "", at: ""}
+pr: ""
+rejected: 0
+notes: ""                 # 작업자 체크포인트·discovered:·needs-source:
+created: 2026-10-24

@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""ready 큐 — 차단(blocked_by)이 모두 done 인 open 티켓. 우선순위·생성일 순.
+사용: build/ready            목록
+      build/ready --one      첫 티켓 id 만 (없으면 종료코드 1)
+      build/ready --json"""
+import sys, json
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import ready_tickets
+
+ts = ready_tickets()
+if "--one" in sys.argv:
+    if not ts:
+        sys.exit(1)
+    print(ts[0]["id"])
+elif "--json" in sys.argv:
+    print(json.dumps([{k: t.get(k) for k in ("id", "type", "title", "priority", "created")} for t in ts], ensure_ascii=False, indent=1))
+else:
+    for t in ts:
+        print(f"{t['id']}  P{t.get('priority', 2)}  {t.get('type')}  {t.get('title')}")
+    if not ts:
+        print("(ready 없음)")

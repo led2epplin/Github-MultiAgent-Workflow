@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""티켓 조작 — 발급·claim·이동·반려·완료. 상태 = 디렉터리.
+사용:
+  build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx]
+  build/tk claim T-xxx <runner>      open → doing (claim 기록)
+  build/tk move  T-xxx <state>       임의 이동
+  build/tk reject T-xxx <reason>     doing → open (rejected+1; 3회면 stranded)
+  build/tk done  T-xxx               → done (closed 시각)
+  build/tk show  T-xxx
+  build/tk set   T-xxx key value     필드 설정(pr, notes 등; notes 는 append)"""
+import sys, argparse
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import *  # noqa
+
+
+def cmd_new(a):
+    p = argparse.ArgumentParser()
+    p.add_argument("--type", required=True); p.add_argument("--title", required=True); p.add_argument("--goal", required=True)
+    p.add_argument("--inputs", default=""); p.add_argument("--outputs", required=True); p.add_argument("--dod", default="schema")
+    p.add_argument("--priority", type=int, default=2); p.add_argument("--blocked-by", default=""); p.add_argument("--issue", default="")
+    p.add_argument("--from", dest="frm", default=""); p.add_argument("--read-kb", type=int, default=60); p.add_argument("--max-turns", type=int, default=40)
+    o = p.parse_args(a)
+    if o.type not in TICKET_TYPES:
+        die(f"type 오류: {o.type}")
+    sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
+    t = {"id": new_ticket_id(o.title), "type": o.type, "title": o.title, "goal": o.goal, "issue": o.issue,
+         "priority": o.priority, "inputs": sp(o.inputs), "outputs": sp(o.outputs), "dod": sp(o.dod),
+         "limits": {"read_kb": o.read_kb, "max_turns": o.max_turns}, "blocked_by": sp(o.blocked_by), "blocks": [],
+         "parent": "", "discovered_from": o.frm, "claim": {"by": "", "at": ""}, "pr": "", "rejected": 0, "notes": "",
+         "created": today()}
+    path = save_ticket(t, "open")
+    print(t["id"], rel(path))
+
+
+def cmd_claim(tid, runner):
+    t = load_ticket(tid)
+    if t["_state"] != "open":
+        die(f"{tid} 는 {t['_state']} 상태 — claim 불가")
+    t["claim"] = {"by": runner, "at": now()}
+    save_ticket(t, "doing"); print(f"claim {tid} by {runner}")
+
+
+def cmd_move(tid, state):
+    if state not in TICKET_STATES:
+        die(f"state 오류: {state}")
+    t = load_ticket(tid); save_ticket(t, state); print(f"{tid} → {state}")
+
+
+def cmd_reject(tid, reason):
+    t = load_ticket(tid)
+    t["rejected"] = int(t.get("rejected") or 0) + 1
+    t["notes"] = (str(t.get("notes") or "") + f"\n[reject {t['rejected']} {now()}] {reason}").strip()
+    t["claim"] = {"by": "", "at": ""}
+    st = "stranded" if t["rejected"] >= 3 else "open"
+    save_ticket(t, st); print(f"{tid} reject#{t['rejected']} → {st}")
+
+
+def cmd_done(tid):
+    t = load_ticket(tid); t["closed"] = now(); save_ticket(t, "done"); print(f"{tid} → done")
+
+
+def cmd_set(tid, key, value):
+    t = load_ticket(tid)
+    if key == "notes":
+        t["notes"] = (str(t.get("notes") or "") + "\n" + value).strip()
+    elif key == "rejected":
+        t[key] = int(value)
+    else:
+        t[key] = value
+    save_ticket(t); print(f"{tid}.{key} set")
+
+
+def cmd_show(tid):
+    print(Path(load_ticket(tid)["_path"]).read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a:
+        die(__doc__)
+    c = a[0]
+    try:
+        if c == "new": cmd_new(a[1:])
+        elif c == "claim": cmd_claim(a[1], a[2])
+        elif c == "move": cmd_move(a[1], a[2])
+        elif c == "reject": cmd_reject(a[1], " ".join(a[2:]) or "reason 없음")
+        elif c == "done": cmd_done(a[1])
+        elif c == "set": cmd_set(a[1], a[2], " ".join(a[3:]))
+        elif c == "show": cmd_show(a[1])
+        else: die(__doc__)
+    except (FileNotFoundError, IndexError) as e:
+        die(str(e) or __doc__)

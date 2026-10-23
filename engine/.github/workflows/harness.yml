@@ -1,0 +1,70 @@
+name: harness
+# ready 티켓이 있으면 일회용 우분투에서 build/run_ticket.sh 를 돌린다. 상태는 전부 저장소에 push 된다.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      budget_min:
+        description: "시간 예산(분)"
+        default: "50"
+      dry_run:
+        description: "1 이면 claude 없이 스모크 티켓만(build/dry_worker)"
+        default: "0"
+      no_pr:
+        description: "1 이면 PR 없이 main 직접(스모크 전용)"
+        default: "0"
+
+concurrency:
+  group: harness
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ready 티켓 확인
+        id: ready
+        run: |
+          pip install -q pyyaml
+          if T=$(python3 build/ready --one); then echo "ticket=$T" >> "$GITHUB_OUTPUT"; echo "ready: $T"; else echo "ticket=" >> "$GITHUB_OUTPUT"; echo "ready 없음"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.ready.outputs.ticket != '' && inputs.dry_run != '1'
+        with:
+          node-version: 22
+
+      - name: Claude Code 설치
+        if: steps.ready.outputs.ticket != '' && inputs.dry_run != '1'
+        run: npm i -g @anthropic-ai/claude-code && claude --version
+
+      - name: 하니스 실행
+        if: steps.ready.outputs.ticket != ''
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          GH_TOKEN: ${{ github.token }}
+          HARNESS_RUNNER: gha-${{ github.run_id }}
+          BUDGET_MIN: ${{ inputs.budget_min || '50' }}
+          DRY_RUN: ${{ inputs.dry_run || '0' }}
+          NO_PR: ${{ inputs.no_pr || '0' }}
+        run: |
+          git config user.name "hj2-harness"
+          git config user.email "hj2-harness@users.noreply.github.com"
+          bash build/run_ticket.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.ready.outputs.ticket != ''
+        with:
+          name: runs-${{ github.run_id }}
+          path: runs/
+          if-no-files-found: ignore

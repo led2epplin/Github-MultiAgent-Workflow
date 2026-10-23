@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""큰 파일에서 조각만 뽑는다 — 통째로 읽지 않기 위한 도구.
+사용: build/extract <file> [key.path | #index | /regex/] [--max-kb 8]
+  JSON: key.path(점 구분, 배열은 숫자) 로 하위 객체를 출력. '#05' 는 최상위 배열/객체의 5번째 항목.
+  텍스트/MD: /regex/ 와 일치하는 줄부터 다음 '## ' 또는 max-kb 까지."""
+import sys, json, re
+from pathlib import Path
+
+a = sys.argv[1:]
+if not a:
+    print(__doc__); sys.exit(1)
+f = Path(a[0]); sel = a[1] if len(a) > 1 and not a[1].startswith("--") else ""
+kb = 8
+if "--max-kb" in a:
+    kb = int(a[a.index("--max-kb") + 1])
+raw = f.read_text(encoding="utf-8")
+out = ""
+if f.suffix == ".json":
+    obj = json.loads(raw)
+    if sel.startswith("#"):
+        i = int(sel[1:]) if sel[1:].isdigit() else 0
+        if isinstance(obj, dict):
+            keys = list(obj.keys())
+            obj = {keys[i]: obj[keys[i]]} if i < len(keys) else {}
+        else:
+            obj = obj[i] if i < len(obj) else None
+    elif sel:
+        for k in sel.split("."):
+            obj = obj[int(k)] if isinstance(obj, list) else obj.get(k)
+            if obj is None:
+                break
+    out = json.dumps(obj, ensure_ascii=False, indent=1)
+else:
+    if sel.startswith("/") and sel.endswith("/"):
+        rx = re.compile(sel[1:-1])
+        lines = raw.splitlines(); buf = []; on = False
+        for ln in lines:
+            if not on and rx.search(ln):
+                on = True
+            elif on and ln.startswith("## ") and buf:
+                break
+            if on:
+                buf.append(ln)
+        out = "\n".join(buf)
+    else:
+        out = raw
+if len(out.encode()) > kb * 1024:
+    out = out.encode()[: kb * 1024].decode(errors="ignore") + f"\n…(잘림: {kb}KB 상한. 선택자를 좁혀라)"
+print(out)
