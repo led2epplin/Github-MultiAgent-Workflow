@@ -54,6 +54,7 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           GH_TOKEN: ${{ github.token }}
           HARNESS_RUNNER: gha-${{ github.run_id }}
+          HARNESS_TRUST: "1"
           BUDGET_MIN: ${{ inputs.budget_min || '50' }}
           DRY_RUN: ${{ inputs.dry_run || '0' }}
           NO_PR: ${{ inputs.no_pr || '0' }}

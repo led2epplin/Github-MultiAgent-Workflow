@@ -12,6 +12,19 @@ MAX_TICKETS=${MAX_TICKETS:-20}
 MAIN=${MAIN_BRANCH:-main}
 START=$(date +%s)
 log() { echo "[$(date +%H:%M:%S)] $*"; }
+trust_workspace() {   # 비대화 실행은 신뢰 대화상자를 못 띄운다 → 이 폴더를 미리 신뢰 목록에 넣는다(HARNESS_TRUST=1 일 때만)
+  [ "${HARNESS_TRUST:-0}" = "1" ] || return 0
+  python3 - "$ROOT" "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" <<'PY'
+import json, sys, os
+root, cfg = sys.argv[1], sys.argv[2]
+try: d = json.load(open(cfg, encoding="utf-8"))
+except Exception: d = {}
+d.setdefault("projects", {}).setdefault(root, {})["hasTrustDialogAccepted"] = True
+os.makedirs(os.path.dirname(cfg), exist_ok=True)
+json.dump(d, open(cfg, "w", encoding="utf-8"), indent=1)
+print("trust:", root)
+PY
+}
 
 sync_main() {   # main 최신화. 실패하면 하드 리셋(로컬 변경은 티켓 단위로 이미 push 됐거나 버려도 되는 것)
   git checkout -q "$MAIN" 2>/dev/null || true
@@ -40,6 +53,7 @@ while [ "$n" -lt "$MAX_TICKETS" ]; do
   git checkout -q -B "$BR"
   # 2) 작업자 — 티켓마다 새 세션. 티켓·STATUS·lessons 는 SessionStart 훅이 주입한다
   mkdir -p runs
+  trust_workspace
   if [ "${DRY_RUN:-0}" = "1" ]; then
     if [ -f domain/smoke.py ]; then TICKET="$T" python3 domain/smoke.py "$T" > "runs/$T.log" 2>&1; rc=$?; else echo "domain/smoke.py 없음" > "runs/$T.log"; rc=1; fi
   else
@@ -56,6 +70,23 @@ except Exception as e: print("runs json 읽기 실패:", e)
 EOF
   fi
   log "작업자 rc=$rc"
+  # 2b) 러너 장애(인증 실패 등 API 오류)는 티켓 탓이 아니다 → 반려 세지 않고 open 으로 되돌린 뒤 실패 종료
+  if [ "${DRY_RUN:-0}" != "1" ] && python3 - "$T" <<'PY'
+import json, sys
+try: d = json.load(open(f"runs/{sys.argv[1]}.json"))
+except Exception: sys.exit(1)
+sys.exit(0 if (d.get("is_error") and (d.get("api_error_status") or d.get("terminal_reason") == "api_error")) else 1)
+PY
+  then
+    ERRMSG=$(python3 -c "import json;print(json.load(open('runs/$T.json')).get('result','')[:200])" 2>/dev/null)
+    log "러너 장애: $ERRMSG — 티켓 $T 되돌림(반려 아님), 실행 종료"
+    git checkout -q "$MAIN" && sync_main && git branch -q -D "$BR" 2>/dev/null
+    python3 build/tk move "$T" open && python3 build/tk set "$T" claim.by "" >/dev/null 2>&1 || true
+    python3 build/tk set "$T" notes "[runner-fail $(date +%H:%M)] $ERRMSG"
+    push_main "unclaim $T (runner failure)"
+    echo "::error::러너 장애 — $ERRMSG"
+    exit 2
+  fi
   # 3) 검증 — 통과해야만 PR. 실패면 반려(3회면 좌초)
   if python3 build/validate --ticket "$T" > "runs/$T.validate" 2>&1; then
     log "validate 통과"

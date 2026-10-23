@@ -66,6 +66,11 @@ def cmd_set(tid, key, value):
         t["notes"] = (str(t.get("notes") or "") + "\n" + value).strip()
     elif key == "rejected":
         t[key] = int(value)
+    elif "." in key:                       # claim.by 처럼 중첩 키
+        a, b = key.split(".", 1)
+        if not isinstance(t.get(a), dict):
+            t[a] = {}
+        t[a][b] = value
     else:
         t[key] = value
     save_ticket(t); print(f"{tid}.{key} set")
