@@ -47,6 +47,15 @@ jobs:
         if: steps.ready.outputs.ticket != '' && inputs.dry_run != '1'
         run: npm i -g @anthropic-ai/claude-code && claude --version
 
+      - name: 토큰 점검 (값은 출력하지 않음)
+        if: steps.ready.outputs.ticket != '' && inputs.dry_run != '1'
+        env:
+          TOK: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$TOK" ]; then echo "::error::CLAUDE_CODE_OAUTH_TOKEN 비밀이 비어 있음 — 이 저장소 Settings→Secrets and variables→Actions→Repository secrets 에 같은 이름으로 있어야 한다(Variables 탭·다른 저장소·Environment 비밀은 안 읽힘)"; exit 1; fi
+          echo "토큰 길이=${#TOK} 접두=${TOK:0:12} 공백문자=$(printf %s "$TOK" | tr -cd '[:space:]' | wc -c)"
+          case "$TOK" in sk-ant-oat01-*) echo "형식: 구독 OAuth 토큰(정상)";; sk-ant-api*) echo "::warning::API 키 형식 — CLAUDE_CODE_OAUTH_TOKEN 이 아니라 ANTHROPIC_API_KEY 로 넣어야 함";; *) echo "::warning::알 수 없는 형식 — claude setup-token 출력 전체인지 확인";; esac
+
       - name: 하니스 실행
         if: steps.ready.outputs.ticket != ''
         env:
