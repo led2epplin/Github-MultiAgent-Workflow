@@ -90,7 +90,7 @@ PY
   # 3) 검증 — 통과해야만 PR. 실패면 반려(3회면 좌초)
   if python3 build/validate --ticket "$T" > "runs/$T.validate" 2>&1; then
     log "validate 통과"
-    git add -A; git commit -qm "work $T" || true
+    git add -A; git add -f "runs/$T.json" "runs/$T.validate" 2>/dev/null; git commit -qm "work $T" || true   # runs/ 는 gitignore — PR 브랜치에만 증거로 싣는다
     if [ "${NO_PR:-0}" = "1" ]; then
       git checkout -q "$MAIN" && git merge -q --ff-only "$BR" && python3 build/tk move "$T" review && push_main "review $T (no-pr)" ; git branch -q -D "$BR"
     else

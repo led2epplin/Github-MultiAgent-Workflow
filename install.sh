@@ -35,7 +35,7 @@ chmod +x build/tk build/ready build/validate build/status build/session_start bu
 for d in open doing review done stranded; do mkdir -p "tickets/$d"; [ -e "tickets/$d/.gitkeep" ] || touch "tickets/$d/.gitkeep"; done
 mkdir -p runs; [ -e runs/.gitkeep ] || touch runs/.gitkeep
 [ -f VERSION ] || echo "0.1.0-dev" > VERSION
-[ -f .gitignore ] || printf 'cache/\nruns/*.err\nruns/*.pr.err\n__pycache__/\n*.pyc\n' > .gitignore
+[ -f .gitignore ] || printf 'cache/\nruns/\n__pycache__/\n*.pyc\n' > .gitignore
 echo "$VER" > ENGINE_VERSION
 python3 build/status > /dev/null 2>&1 || true
 echo "engine $VER → $TARGET  (갱신: bash install.sh $TARGET <태그>)"
