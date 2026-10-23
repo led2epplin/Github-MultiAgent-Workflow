@@ -88,24 +88,40 @@ PY
     exit 2
   fi
   # 3) 검증 — 통과해야만 PR. 실패면 반려(3회면 좌초)
+  # 작업자가 티켓 notes 에 적은 것(브랜치 사본)을 꺼내 둔다 — 티켓 정본은 main 이므로 브랜치에는 티켓 변경을 싣지 않는다
+  WNOTES=$(python3 - "$T" <<'PY'
+import yaml, sys, subprocess
+t = sys.argv[1]
+cur = (yaml.safe_load(open(f"tickets/doing/{t}.yaml", encoding="utf-8")) or {}).get("notes") or ""
+try:
+    base = subprocess.run(["git", "show", f"HEAD:tickets/doing/{t}.yaml"], capture_output=True, text=True).stdout
+    base = (yaml.safe_load(base) or {}).get("notes") or ""
+except Exception:
+    base = ""
+print(cur.replace(base, "", 1).strip())
+PY
+)
+  git checkout -q -- tickets/ 2>/dev/null || true
   if python3 build/validate --ticket "$T" > "runs/$T.validate" 2>&1; then
     log "validate 통과"
     git add -A; git add -f "runs/$T.json" "runs/$T.validate" 2>/dev/null; git commit -qm "work $T" || true   # runs/ 는 gitignore — PR 브랜치에만 증거로 싣는다
     if [ "${NO_PR:-0}" = "1" ]; then
-      git checkout -q "$MAIN" && git merge -q --ff-only "$BR" && python3 build/tk move "$T" review && push_main "review $T (no-pr)" ; git branch -q -D "$BR"
+      git checkout -q "$MAIN" && git merge -q --ff-only "$BR" && python3 build/tk move "$T" review && { [ -n "$WNOTES" ] && python3 build/tk set "$T" notes "[worker] $WNOTES"; push_main "review $T (no-pr)"; } ; git branch -q -D "$BR"
     else
       git push -q -f origin "$BR"
       TITLE=$(python3 -c "import yaml;print(yaml.safe_load(open('tickets/doing/$T.yaml'))['title'])")
       PR=$(gh pr create --base "$MAIN" --head "$BR" --title "$T: $TITLE" --body "티켓 $T — 검수자는 AGENTS.md 규칙으로 「오류 n / 권고 m / 확인 k」를 남겨 주세요. validate 통과분. runs/$T.validate 참고." 2>runs/$T.pr.err) || PR="(pr 생성 실패: $(tail -c 200 runs/$T.pr.err))"
       log "PR: $PR"
       git checkout -q "$MAIN" && sync_main
-      python3 build/tk set "$T" pr "$PR" && python3 build/tk move "$T" review && push_main "review $T → $PR"
+      python3 build/tk set "$T" pr "$PR" && python3 build/tk move "$T" review
+      [ -n "$WNOTES" ] && python3 build/tk set "$T" notes "[worker] $WNOTES"
+      push_main "review $T → $PR"
     fi
   else
     log "validate 실패 — 반려"; head -20 "runs/$T.validate"
     REASON=$(grep -c '^오류' "runs/$T.validate" || true)
     git checkout -q "$MAIN" && sync_main && git branch -q -D "$BR" 2>/dev/null
-    python3 build/tk reject "$T" "validate 오류 ${REASON}건 ($HARNESS_RUNNER) — $(grep '^오류' "runs/$T.validate" | head -3 | tr '\n' ' ')"
+    python3 build/tk reject "$T" "validate 오류 ${REASON}건 ($HARNESS_RUNNER) — $(grep '^오류' "runs/$T.validate" | head -3 | tr '\n' ' ') | worker: ${WNOTES:0:300}"
     push_main "reject $T"
   fi
 done
