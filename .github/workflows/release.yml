@@ -1,0 +1,31 @@
+name: release
+# 태그·Release 생성(동결). 수동 실행. 태그 이름을 비우면 VERSION(없으면 ENGINE_VERSION) 에 v 를 붙인다.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "태그 이름(예: v7.1.0). 비우면 VERSION 파일"
+        default: ""
+permissions:
+  contents: write
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 태그·Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="v$(cat VERSION 2>/dev/null || cat ENGINE_VERSION)"; fi
+          git config user.name "release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then echo "이미 있는 태그: $TAG"; exit 1; fi
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          NOTES=$(sed -n '1,60p' CHANGELOG.md 2>/dev/null || echo "$TAG")
+          gh release create "$TAG" --title "$TAG" --notes "$NOTES" || echo "release 생성 생략"
+          echo "태그 $TAG 완료"

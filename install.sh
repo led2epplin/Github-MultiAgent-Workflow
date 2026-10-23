@@ -25,6 +25,7 @@ cp "$SRC/engine/.claude/settings.json" .claude/settings.json
 rm -rf .claude/skills/work .claude/skills/review
 cp -r "$SRC/engine/.claude/skills/work" "$SRC/engine/.claude/skills/review" .claude/skills/
 cp "$SRC/engine/.github/workflows/harness.yml" .github/workflows/harness.yml
+cp "$SRC/engine/.github/workflows/release.yml" .github/workflows/release.yml
 chmod +x build/tk build/ready build/validate build/status build/session_start build/guard_write build/extract build/run_ticket.sh 2>/dev/null || true
 # 프로젝트 소유(없을 때만)
 [ -f CLAUDE.md ] || cp "$SRC/engine/CLAUDE.md" CLAUDE.md
