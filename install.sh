@@ -32,7 +32,7 @@ chmod +x build/tk build/ready build/validate build/status build/session_start bu
 [ -f AGENTS.md ] || cp "$SRC/engine/AGENTS.md" AGENTS.md
 [ -d domain ] || cp -r "$SRC/engine/domain" domain
 [ -d notes ] || cp -r "$SRC/engine/notes" notes
-for d in open doing review done stranded; do mkdir -p "tickets/$d"; [ -e "tickets/$d/.gitkeep" ] || touch "tickets/$d/.gitkeep"; done
+for d in open hold doing review done stranded; do mkdir -p "tickets/$d"; [ -e "tickets/$d/.gitkeep" ] || touch "tickets/$d/.gitkeep"; done
 mkdir -p runs; [ -e runs/.gitkeep ] || touch runs/.gitkeep
 [ -f VERSION ] || echo "0.1.0-dev" > VERSION
 [ -f .gitignore ] || printf 'cache/\nruns/\n__pycache__/\n*.pyc\n' > .gitignore

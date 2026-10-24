@@ -3,7 +3,7 @@
 사용:
   build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx]
   build/tk claim T-xxx <runner>      open → doing (claim 기록)
-  build/tk move  T-xxx <state>       임의 이동
+  build/tk move  T-xxx <state>       임의 이동 (hold = 사람 입력 대기, ready 큐에서 빠짐)
   build/tk reject T-xxx <reason>     doing → open (rejected+1; 3회면 stranded)
   build/tk done  T-xxx               → done (closed 시각)
   build/tk show  T-xxx

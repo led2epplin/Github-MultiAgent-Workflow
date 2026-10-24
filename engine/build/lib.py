@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(os.environ.get("HJ_ROOT") or Path(__file__).resolve().parent.parent)
-TICKET_STATES = ["open", "doing", "review", "done", "stranded"]
+TICKET_STATES = ["open", "hold", "doing", "review", "done", "stranded"]   # hold = 사람 입력 대기(ready 제외)
 TICKET_TYPES = ["task", "card", "problem", "review", "change", "process", "source", "smoke"]
 TZ_HOURS = int(os.environ.get("HJ_TZ_HOURS", "9"))
 

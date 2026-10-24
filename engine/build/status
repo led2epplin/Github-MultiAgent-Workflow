@@ -11,13 +11,15 @@ ver = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION
 eng = (ROOT / "ENGINE_VERSION").read_text(encoding="utf-8").strip() if (ROOT / "ENGINE_VERSION").exists() else "?"
 ready = ready_tickets()
 L = [f"# STATUS (자동 생성 {now()}) — VERSION {ver} · engine {eng}", "",
-     "## 티켓", "| open | doing | review | done | stranded |", "|---|---|---|---|---|",
-     f"| {by_state['open']} | {by_state['doing']} | {by_state['review']} | {by_state['done']} | {by_state['stranded']} |", "",
+     "## 티켓", "| open | hold | doing | review | done | stranded |", "|---|---|---|---|---|---|",
+     f"| {by_state['open']} | {by_state['hold']} | {by_state['doing']} | {by_state['review']} | {by_state['done']} | {by_state['stranded']} |", "",
      "### ready (다음에 집을 것)"]
 L += [f"- {t['id']} P{t.get('priority', 2)} {t.get('type')} — {t.get('title')}" for t in ready] or ["- (없음)"]
 L += ["", "### doing / review"]
 L += [f"- {t['id']} [{t['_state']}] {t.get('title')} — claim {t.get('claim', {}).get('by', '')} {t.get('claim', {}).get('at', '')} pr {t.get('pr', '') or '-'}"
       for t in ts if t["_state"] in ("doing", "review")] or ["- (없음)"]
+L += ["", "### hold (사람 입력 대기)"]
+L += [f"- {t['id']} {t.get('title')} — {str(t.get('notes',''))[-120:]}" for t in ts if t["_state"] == "hold"] or ["- (없음)"]
 L += ["", "### stranded (반려 3회)"]
 L += [f"- {t['id']} {t.get('title')} — notes: {str(t.get('notes', ''))[:120]}" for t in ts if t["_state"] == "stranded"] or ["- (없음)"]
 L += ["", "## 최근 done 10"]
