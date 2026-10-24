@@ -1,15 +1,18 @@
 name: harness
 # ready 티켓이 있으면 일회용 우분투에서 build/run_ticket.sh 를 돌린다. 상태는 전부 저장소에 push 된다.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
+  push:                       # 오케스트레이터가 티켓을 push 하면 즉시 (러너 자신의 push 는 GITHUB_TOKEN 이라 재귀 없음)
+    branches: [main]
+    paths: ["tickets/open/**"]
+  schedule:                   # 예비. GitHub 는 잦은 cron 을 크게 늦춘다(실측 4~5시간 간격) — 즉시성은 push/수동 실행이 맡는다
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       budget_min:
         description: "시간 예산(분)"
         default: "50"
       dry_run:
-        description: "1 이면 claude 없이 스모크 티켓만(build/dry_worker)"
+        description: "1 이면 claude 없이 스모크 티켓만(domain/smoke.py)"
         default: "0"
       no_pr:
         description: "1 이면 PR 없이 main 직접(스모크 전용)"

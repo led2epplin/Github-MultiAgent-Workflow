@@ -6,10 +6,10 @@ goal: >-
 issue: ""                 # GitHub Issue 번호 (#12) 있으면
 priority: 2               # 1 급함 / 2 보통 / 3 나중
 inputs:                   # 읽어도 되는 파일(상대경로). 합계 limits.read_kb 이하
-  - legacy/민법_V6.3.json#05
+  - legacy/example.json#05
   - sources/prec/2013다7769.json
-  - build/schemas/card.md
-  - build/schemas/problem.md
+  - domain/schemas/card.md
+  - domain/schemas/problem.md
 outputs:                  # 써도 되는 파일. 이 밖은 훅이 막음
   - cards/민법/MIN-05A.md
   - problems/민법/MIN-05A-P1.md
