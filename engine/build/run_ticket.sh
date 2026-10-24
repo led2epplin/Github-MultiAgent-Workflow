@@ -123,6 +123,10 @@ PY
   else
     log "validate 실패 — 반려"; head -20 "runs/$T.validate"
     REASON=$(grep -c '^오류' "runs/$T.validate" || true)
+    # 반려돼도 작업물은 버리지 않는다 — rejected/<T>-<회차> 브랜치로 push 해 두고(검수·재작업 참고) main 에서는 티켓만 되돌린다
+    N=$(python3 -c "import yaml;print(int((yaml.safe_load(open('tickets/doing/$T.yaml')).get('rejected') or 0)+1))" 2>/dev/null || echo 1)
+    git add -A; git add -f "runs/$T.json" "runs/$T.validate" 2>/dev/null; git commit -qm "rejected work $T (#$N)" || true
+    git push -q -f origin "$BR:rejected/$T-$N" 2>/dev/null && log "작업물 보존: rejected/$T-$N" || true
     git checkout -q "$MAIN" && sync_main && git branch -q -D "$BR" 2>/dev/null
     python3 build/tk reject "$T" "validate 오류 ${REASON}건 ($HARNESS_RUNNER) — $(grep '^오류' "runs/$T.validate" | head -3 | tr '\n' ' ') | worker: ${WNOTES:0:300}"
     push_main "reject $T"
