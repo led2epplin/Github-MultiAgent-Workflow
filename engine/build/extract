@@ -17,6 +17,8 @@ raw = f.read_text(encoding="utf-8")
 out = ""
 if f.suffix == ".json":
     obj = json.loads(raw)
+    if sel.startswith("#") and not sel[1:].isdigit():
+        sel = sel[1:]   # 티켓 inputs 의 '#키.경로' 표기를 그대로 받는다('#민법.47' 을 47번째 최상위 항목으로 읽어 엉뚱한 과목을 돌려준 사고)
     if sel.startswith("#"):
         i = int(sel[1:]) if sel[1:].isdigit() else 0
         if isinstance(obj, dict):
