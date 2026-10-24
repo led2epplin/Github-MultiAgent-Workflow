@@ -110,7 +110,10 @@ PY
     else
       git push -q -f origin "$BR"
       TITLE=$(python3 -c "import yaml;print(yaml.safe_load(open('tickets/doing/$T.yaml'))['title'])")
-      PR=$(gh pr create --base "$MAIN" --head "$BR" --title "$T: $TITLE" --body "티켓 $T — 검수자는 AGENTS.md 규칙으로 「오류 n / 권고 m / 확인 k」를 남겨 주세요. validate 통과분. runs/$T.validate 참고." 2>runs/$T.pr.err) || PR="(pr 생성 실패: $(tail -c 200 runs/$T.pr.err))"
+      PR=$(gh pr create --base "$MAIN" --head "$BR" --title "$T: $TITLE" --body "티켓 $T — 검수자는 AGENTS.md 규칙으로 「오류 n / 권고 m / 확인 k」를 남겨 주세요. validate 통과분. runs/$T.validate 참고." 2>runs/$T.pr.err) \
+        || PR=$(gh pr list --head "$BR" --state open --json url -q '.[0].url' 2>/dev/null) \
+        || PR="(pr 생성 실패: $(tail -c 200 runs/$T.pr.err))"
+      [ -z "$PR" ] && PR="(pr 생성 실패: $(tail -c 200 runs/$T.pr.err))"
       log "PR: $PR"
       git checkout -q "$MAIN" && sync_main
       python3 build/tk set "$T" pr "$PR" && python3 build/tk move "$T" review
