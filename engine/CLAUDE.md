@@ -26,3 +26,7 @@
 1. `python3 build/validate --ticket $TICKET` 가 0 으로 끝날 때까지 고친다(최대 3회 시도. 안 되면 `notes:` 에 원인을 적고 멈춘다).
 2. `python3 build/tk set $TICKET notes "<한 줄: 만든 것 / 불확실한 것 / discovered: / needs-source:>"` 를 한 번 실행한다.
 3. 커밋·PR·상태 전이는 하니스(`build/run_ticket.sh`)가 한다. 네가 git 명령을 칠 필요는 없다.
+
+## 대화형 세션(오케스트레이터) — 장기기억
+- 사용자 지시·정정·진단·결정은 **그 턴에** `notes/knowledge/`(색인 `INDEX.md`)에 기록하고 커밋·push 한다. 대화에만 남은 정보는 없는 정보다.
+- 티켓을 발주할 때 관련 knowledge 문서를 `inputs:` 에 넣는다(작업자는 inputs 만 읽는다).
