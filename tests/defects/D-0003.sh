@@ -38,7 +38,7 @@ check() {       # check <폴더> <이름> [pr-branch-ok] — PR 경로 경합(�
   echo "[원격 브랜치]"; git --git-dir="$C.remote.git" for-each-ref --format='  %(refname:short)' refs/heads; echo '```'
   expect_eq "$tag — 원격 티켓은 doing · claim = B" "tickets/doing/$TID.yaml B" "$(remote_state "$C")"
   expect_eq "$tag — A 의 review 전이 없음" 0 "$(git --git-dir="$C.remote.git" log --format=%s main | grep -c "^review $TID")"
-  [ -n "$brok" ] || expect "$tag — A 의 t/$TID 브랜치 push 없음" test -z "$(git --git-dir="$C.remote.git" for-each-ref "refs/heads/t/$TID")"
+  [ -n "$brok" ] || expect "$tag — A 의 작업 브랜치(t/$TID…) push 없음" test -z "$(git --git-dir="$C.remote.git" for-each-ref --format='%(refname:short)' refs/heads/t/ | grep "^t/$TID")"
   expect_grep "$tag — A 로그에 「인계 … 확정 중지/실행기 종료」" '인계' "$W/$tag.log"
   expect_eq "$tag — 하니스가 끝난 뒤 임시 worktree 없음(renew 용)" 1 "$(git -C "$C-a" worktree list --porcelain | grep -c '^worktree ')"
 }

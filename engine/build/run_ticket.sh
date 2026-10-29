@@ -69,11 +69,11 @@ still_mine() {  # 원격 main 에서 티켓이 아직 doing 이고 claim 세대�
   git fetch -q origin "$MAIN" 2>/dev/null || return 1
   [ "$(claim_gen "$T" "origin/$MAIN")" = "$MYGEN" ]
 }
-lost() {        # lost <단계> — 다른 세션이 인계했다: 상태를 바꾸지 않고, 작업물은 lost/<티켓>-<세션> 브랜치로만 남긴다
+lost() {        # lost <단계> — 다른 세션이 인계했다: 상태를 바꾸지 않고, 작업물은 lost/<티켓>-<세션>-<세대> 브랜치로만 남긴다
   log "티켓 $T 은 다른 세션이 인계(원격 claim $(claim_gen "$T" "origin/$MAIN")) — $1 에서 결과 확정 중지, 상태 안 바꿈"
   if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$BR" ]; then
     git add -A 2>/dev/null; git add -f "${EVID[@]}" 2>/dev/null; git commit -qm "lost work $T ($HARNESS_RUNNER)" 2>/dev/null || true
-    git push -q -f origin "HEAD:refs/heads/lost/$T-$HARNESS_RUNNER" 2>/dev/null && log "작업물 보존: lost/$T-$HARNESS_RUNNER" || true
+    git push -q -f origin "HEAD:refs/heads/lost/${BR#t/}" 2>/dev/null && log "작업물 보존: lost/${BR#t/}" || true
   fi
   git checkout -q -f "$MAIN" 2>/dev/null; sync_main; git branch -q -D "$BR" 2>/dev/null; rm -f "runs/$T.lost"
 }
@@ -123,7 +123,9 @@ while [ "$n" -lt "$MAX_TICKETS" ]; do
   fi
   n=$((n+1))
   MYGEN=$(claim_gen "$T"); EVID=()
-  BR="t/$T"
+  # 작업 브랜치 = 티켓 + 실행 세션 + claim 세대(claim.at) — 인계·재작업으로 같은 티켓을 여러 세션이 처리해도 서로의 브랜치를 -f 로 덮지 않는다(D-0005)
+  GEN=$(printf '%s' "${MYGEN#*|}" | tr -d ' :-'); GEN=${GEN:0:8}T${GEN:8}
+  BR="t/$T-$(printf '%s' "$HARNESS_RUNNER" | tr -c 'A-Za-z0-9._-' '-')-$GEN"
   git checkout -q -B "$BR"
   # 3) 작업자 — 티켓마다 새 세션. 티켓·STATUS·lessons 는 SessionStart 훅이 주입한다
   mkdir -p runs
@@ -177,7 +179,7 @@ PY
       tr_review_nopr() { git merge -q --no-edit "$BR" && python3 build/tk move "$T" review && { [ -z "$WNOTES" ] || python3 build/tk set "$T" notes "[worker] $WNOTES"; }; }
       git checkout -q "$MAIN" && fenced "review $T (no-pr, $HARNESS_RUNNER)" tr_review_nopr; git branch -q -D "$BR" 2>/dev/null
     else
-      git push -q -f origin "$BR"
+      git push -q -f origin "$BR"          # -f 는 이 세션·세대의 자기 브랜치에만
       TITLE=$(python3 -c "import yaml;print(yaml.safe_load(open('tickets/doing/$T.yaml'))['title'])")
       PR=$(gh pr create --base "$MAIN" --head "$BR" --title "$T: $TITLE" --body "티켓 $T — 검수자는 AGENTS.md 규칙으로 「오류 n / 권고 m / 확인 k」를 남겨 주세요. validate 통과분. runs/$T.validate 참고. 실행: $HARNESS_RUNNER" 2>runs/$T.pr.err) \
         || PR=$(gh pr list --head "$BR" --state open --json url -q '.[0].url' 2>/dev/null) \
