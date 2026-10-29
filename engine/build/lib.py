@@ -6,12 +6,14 @@ import yaml
 
 ROOT = Path(os.environ.get("HJ_ROOT") or Path(__file__).resolve().parent.parent)
 TICKET_STATES = ["open", "hold", "doing", "review", "done", "stranded"]   # hold = 사람 입력 대기(ready 제외)
-TICKET_TYPES = ["task", "card", "problem", "review", "change", "process", "source", "smoke"]
+TICKET_TYPES = ["task", "card", "problem", "review", "change", "process", "source", "smoke", "defect"]   # defect = 결함 1건(tc 필수, WORKFLOW.md §5)
+LEASE_MIN_DEFAULT = int(os.environ.get("MAWF_LEASE_MIN", "90"))   # claim 임대 기본(분) — 티켓 limits.lease_min 이 우선
 TZ_HOURS = int(os.environ.get("HJ_TZ_HOURS", "9"))
 
 
-def now() -> str:
-    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TZ_HOURS))).strftime("%Y-%m-%d %H:%M")
+def now(plus_min: int = 0) -> str:
+    t = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=TZ_HOURS))) + datetime.timedelta(minutes=plus_min)
+    return t.strftime("%Y-%m-%d %H:%M")
 
 
 def today() -> str:
@@ -113,17 +115,59 @@ def new_ticket_id(seed: str) -> str:
     return f"T-{h}"
 
 
+def lease_min(t: dict) -> int:
+    return int((t.get("limits") or {}).get("lease_min") or LEASE_MIN_DEFAULT)
+
+
+def lease_expired(t: dict) -> bool:
+    """doing 티켓의 임대가 끝났나(WORKFLOW.md §4 인계). lease_until 이 없으면 claim.at + 임대로 본다."""
+    c = t.get("claim") or {}
+    until = str(c.get("lease_until") or "")
+    if not until and c.get("at"):
+        try:
+            at = datetime.datetime.strptime(str(c["at"]), "%Y-%m-%d %H:%M")
+            until = (at + datetime.timedelta(minutes=lease_min(t))).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return False
+    return bool(until) and until < now()
+
+
 def ready_tickets() -> list[dict]:
     ts = all_tickets()
     done = {t["id"] for t in ts if t["_state"] == "done"}
+    me = os.environ.get("HARNESS_RUNNER", "")
     out = []
     for t in ts:
         if t["_state"] != "open":
+            continue
+        want = str(t.get("runner") or "").strip()   # runner 지정 티켓은 그 이름으로 시작하는 HARNESS_RUNNER 만 집는다
+        if want and not me.startswith(want):
             continue
         if all(b in done for b in (t.get("blocked_by") or [])):
             out.append(t)
     out.sort(key=lambda t: (int(t.get("priority") or 2), str(t.get("created") or ""), t["id"]))
     return out
+
+
+def run_tc(t: dict, timeout: int | None = None) -> tuple[int, str]:
+    """티켓의 tc(재현 TC)를 돌린다 — (종료코드, 출력 끝 몇 줄). 규약: <tc> <임시폴더> (WORKFLOW.md §5). 2 = tc 없음/파일 없음."""
+    import subprocess, tempfile
+    tc = str(t.get("tc") or "").strip()
+    if not tc:
+        return 2, "tc 없음"
+    p = ROOT / tc
+    if not p.is_file():
+        return 2, f"tc 파일 없음: {tc}"
+    with tempfile.TemporaryDirectory() as td:
+        w = os.path.join(td, "w")
+        cmd = ["bash", str(p), w] if p.suffix == ".sh" else ([sys.executable, str(p), w] if p.suffix == ".py" else [str(p), w])
+        try:
+            r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                               timeout=timeout or int(os.environ.get("MAWF_TC_TIMEOUT", "900")))
+        except subprocess.TimeoutExpired:
+            return 124, f"tc 시간 초과: {tc}"
+    tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-5:])
+    return r.returncode, tail
 
 
 def iter_md(sub: str):

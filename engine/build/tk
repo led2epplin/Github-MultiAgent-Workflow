@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""티켓 조작 — 발급·claim·이동·반려·완료. 상태 = 디렉터리.
+"""티켓 조작 — 발급·claim·이동·반려·완료·결함 처리. 상태 = 디렉터리. 규칙: .mawf/WORKFLOW.md §4(다중 세션)·§5(결함)
 사용:
-  build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx]
-  build/tk claim T-xxx <runner>      open → doing (claim 기록)
+  build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx] [--tc 경로]
+               type defect 는 --tc 필수(재현 TC — 결함이면 비영 종료). tc 파일이 아직 없으면 outputs 에 있어야 한다
+  build/tk claim T-xxx <세션>        open → doing (임대 lease_until). 같은 세션이 다시 부르면 임대 연장(멱등), 임대 만료된 doing 은 인계(claim.prev)
+  build/tk renew T-xxx <세션>        임대 연장(생존신고) — claim 한 세션만
   build/tk move  T-xxx <state>       임의 이동 (hold = 사람 입력 대기, ready 큐에서 빠짐)
   build/tk reject T-xxx <reason>     doing → open (rejected+1; 3회면 stranded)
   build/tk done  T-xxx               → done (closed 시각)
+  build/tk resolve T-xxx <커밋…>     결함 수정 완료(작업자) → review, fixed_in
+  build/tk close T-xxx <세션>        결함 확인 완료(최종 리뷰어) → done, reviewed_by. tc 를 다시 돌려 실패하면 거절
+  build/tk reopen T-xxx <사유>       결함 재오픈 → open
   build/tk show  T-xxx
   build/tk set   T-xxx key value     필드 설정(pr, notes 등; notes 는 append)"""
 import sys, argparse
@@ -20,25 +25,55 @@ def cmd_new(a):
     p.add_argument("--inputs", default=""); p.add_argument("--outputs", required=True); p.add_argument("--dod", default="schema")
     p.add_argument("--priority", type=int, default=2); p.add_argument("--blocked-by", default=""); p.add_argument("--issue", default="")
     p.add_argument("--from", dest="frm", default=""); p.add_argument("--read-kb", type=int, default=60); p.add_argument("--max-turns", type=int, default=40)
+    p.add_argument("--tc", default="")
     o = p.parse_args(a)
     if o.type not in TICKET_TYPES:
         die(f"type 오류: {o.type}")
     sp = lambda s: [x.strip() for x in s.split(",") if x.strip()]
+    outputs, dod, tc = sp(o.outputs), sp(o.dod), o.tc.strip()
+    if o.type == "defect":
+        if not tc:
+            die("type defect 는 --tc <재현 TC 경로> 가 필수 — 결함이면 비영 종료하는 시험(WORKFLOW.md §5)")
+        if not (ROOT / tc).is_file() and tc not in outputs:
+            die(f"tc 파일 없음: {tc} — 먼저 TC 를 만들거나 outputs 에 넣어 작업자가 쓰게 한다")
+        if "tc" not in dod:
+            dod.append("tc")
     t = {"id": new_ticket_id(o.title), "type": o.type, "title": o.title, "goal": o.goal, "issue": o.issue,
-         "priority": o.priority, "inputs": sp(o.inputs), "outputs": sp(o.outputs), "dod": sp(o.dod),
+         "priority": o.priority, "inputs": sp(o.inputs), "outputs": outputs, "dod": dod,
          "limits": {"read_kb": o.read_kb, "max_turns": o.max_turns}, "blocked_by": sp(o.blocked_by), "blocks": [],
          "parent": "", "discovered_from": o.frm, "claim": {"by": "", "at": ""}, "pr": "", "rejected": 0, "notes": "",
          "created": today()}
+    if tc:
+        t["tc"] = tc
+    if o.type == "defect":
+        t.update({"fixed_in": "", "reviewed_by": ""})
     path = save_ticket(t, "open")
     print(t["id"], rel(path))
 
 
-def cmd_claim(tid, runner):
+def cmd_claim(tid, who):
     t = load_ticket(tid)
+    c = t.get("claim") or {}
+    if t["_state"] == "doing" and c.get("by") == who:
+        c["lease_until"] = now(lease_min(t)); t["claim"] = c
+        save_ticket(t); print(f"claim {tid} by {who} (이미 claim — 임대 연장 {c['lease_until']})"); return
+    if t["_state"] == "doing" and lease_expired(t):
+        prev = f"{c.get('by', '')} {c.get('at', '')}".strip()
+        t["claim"] = {"by": who, "at": now(), "lease_until": now(lease_min(t)), "prev": prev}
+        save_ticket(t); print(f"claim {tid} by {who} (인계 — 이전 {prev} 임대 만료)"); return
     if t["_state"] != "open":
-        die(f"{tid} 는 {t['_state']} 상태 — claim 불가")
-    t["claim"] = {"by": runner, "at": now()}
-    save_ticket(t, "doing"); print(f"claim {tid} by {runner}")
+        die(f"{tid} 는 {t['_state']} 상태(claim {c.get('by', '')}, 임대 {c.get('lease_until', '-')}) — claim 불가")
+    t["claim"] = {"by": who, "at": now(), "lease_until": now(lease_min(t))}
+    save_ticket(t, "doing"); print(f"claim {tid} by {who}")
+
+
+def cmd_renew(tid, who):
+    t = load_ticket(tid)
+    c = t.get("claim") or {}
+    if t["_state"] != "doing" or c.get("by") != who:
+        die(f"{tid}: {who} 가 claim 한 doing 티켓이 아님(상태 {t['_state']}, claim {c.get('by', '')})")
+    c["lease_until"] = now(lease_min(t)); t["claim"] = c
+    save_ticket(t); print(f"{tid} 임대 연장 → {c['lease_until']}")
 
 
 def cmd_move(tid, state):
@@ -58,6 +93,45 @@ def cmd_reject(tid, reason):
 
 def cmd_done(tid):
     t = load_ticket(tid); t["closed"] = now(); save_ticket(t, "done"); print(f"{tid} → done")
+
+
+def _defect(tid):
+    t = load_ticket(tid)
+    if t.get("type") != "defect":
+        die(f"{tid} 는 defect 티켓이 아님(type {t.get('type')})")
+    return t
+
+
+def cmd_resolve(tid, commits):
+    t = _defect(tid)
+    if not commits:
+        die("resolve 에는 수정 커밋이 필요 — build/tk resolve T-xxx <커밋…>")
+    if t["_state"] == "review" and t.get("fixed_in") == " ".join(commits):
+        print(f"{tid} 이미 resolved({t['fixed_in']})"); return
+    if t["_state"] not in ("open", "doing", "review"):
+        die(f"{tid} 는 {t['_state']} 상태 — resolve 불가")
+    t["fixed_in"] = " ".join(commits); t["resolved"] = now()
+    save_ticket(t, "review"); print(f"{tid} → review(resolved, fixed_in {t['fixed_in']})")
+
+
+def cmd_close(tid, who):
+    t = _defect(tid)
+    if t["_state"] == "done" and t.get("reviewed_by") == who:
+        print(f"{tid} 이미 closed({who})"); return
+    if t["_state"] != "review":
+        die(f"{tid} 는 {t['_state']} 상태 — close 는 resolved(review) 만")
+    rc, tail = run_tc(t)
+    if rc != 0:
+        die(f"close 거절 — tc 실패(exit {rc}): {t.get('tc')}\n{tail}\n통과 못 하면 build/tk reopen {tid} <사유>")
+    t["reviewed_by"] = who; t["closed"] = now()
+    save_ticket(t, "done"); print(f"{tid} → done(closed by {who}, tc 통과)")
+
+
+def cmd_reopen(tid, reason):
+    t = _defect(tid)
+    t["notes"] = (str(t.get("notes") or "") + f"\n[reopen {now()}] {reason}").strip()
+    t["claim"] = {"by": "", "at": ""}; t["reviewed_by"] = ""
+    save_ticket(t, "open"); print(f"{tid} → open(reopen)")
 
 
 def cmd_set(tid, key, value):
@@ -88,9 +162,13 @@ if __name__ == "__main__":
     try:
         if c == "new": cmd_new(a[1:])
         elif c == "claim": cmd_claim(a[1], a[2])
+        elif c == "renew": cmd_renew(a[1], a[2])
         elif c == "move": cmd_move(a[1], a[2])
         elif c == "reject": cmd_reject(a[1], " ".join(a[2:]) or "reason 없음")
         elif c == "done": cmd_done(a[1])
+        elif c == "resolve": cmd_resolve(a[1], a[2:])
+        elif c == "close": cmd_close(a[1], a[2])
+        elif c == "reopen": cmd_reopen(a[1], " ".join(a[2:]) or "사유 없음")
         elif c == "set": cmd_set(a[1], a[2], " ".join(a[3:]))
         elif c == "show": cmd_show(a[1])
         else: die(__doc__)

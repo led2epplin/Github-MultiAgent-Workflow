@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""검증기(엔진) — 완료는 여기서 판정한다. 티켓 스키마·VERSION·outputs 존재를 보고,
+"""검증기(엔진) — 완료는 여기서 판정한다. 티켓 스키마·VERSION·outputs 존재와 결함 티켓의 재현 TC(--ticket 일 때 실행)를 보고,
 domain/validate.py 가 있으면 같은 인수로 호출해 결과를 합친다(도메인 규칙은 거기에).
 사용: build/validate [--all] [--ticket T-xxxxxx] [--file path ...]
 종료코드 0 = 통과, 1 = 오류 있음."""
@@ -31,6 +31,13 @@ def validate_ticket(f: Path):
         err(f, f"type 값 오류: {t.get('type')} (허용: {TICKET_TYPES})")
     if not t.get("outputs"):
         err(f, "outputs 비어 있음")
+    tc = str(t.get("tc") or "").strip()
+    if t.get("type") == "defect" and not tc:
+        err(f, "defect 티켓에 tc 없음 — 재현 TC 경로 필수(WORKFLOW.md §5)")
+    if "tc" in (t.get("dod") or []) and not tc:
+        err(f, "dod 에 tc 가 있는데 tc 경로 없음")
+    if tc and not (ROOT / tc).is_file() and tc not in [str(o) for o in (t.get("outputs") or [])]:
+        err(f, f"tc 파일 없음: {tc}")
     protected = (".claude/", "build/", ".github/", "STATUS.md", "VERSION", "ENGINE_VERSION", "tickets/")
     if t.get("type") != "process":
         for o in t.get("outputs") or []:
@@ -95,6 +102,12 @@ def main(argv):
         for o in t.get("outputs") or []:
             if not (ROOT / o).exists():
                 err(ROOT / o, "outputs 파일이 만들어지지 않음")
+        if t.get("type") == "defect" or "tc" in (t.get("dod") or []):
+            rc, tail = run_tc(t)
+            if rc != 0:
+                err(Path(t["_path"]), f"tc 실패(exit {rc}): {t.get('tc')} — " + " | ".join(tail.splitlines()[-3:]))
+            else:
+                print(f"tc 통과: {t.get('tc')}")
     elif do_all or not files:
         for st in TICKET_STATES:
             for f in sorted((ROOT / "tickets" / st).glob("*.yaml")) if (ROOT / "tickets" / st).exists() else []:
