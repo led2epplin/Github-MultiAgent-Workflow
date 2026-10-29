@@ -47,16 +47,16 @@ status: active
 ## 4. 다중 세션
 - **선점 = push 성공**: 티켓 claim 커밋을 main 에 먼저 push 한 세션만 산다. 나중 쪽은 push 거절 → 되돌리고 다음 장으로 간다.
 - **임대·생존신고**: claim 에 `lease_until`(기본 `limits.lease_min`, 없으면 90분)이 붙는다. 작업 중인 세션은 `build/tk renew <티켓> <이름>` 으로 연장한다.
-- **인계**: 임대가 만료된 doing 티켓은 같은 역할의 다른 세션이 `build/tk claim` 으로 인계받는다(이전 세션은 `claim.prev` 에 남는다). 인계받은 세션은 티켓 notes·작업 브랜치부터 확인한다. 교대(같은 역할 새 세션)도 같다 — 진행 중 티켓·브랜치·남은 일을 한 줄로 넘긴다.
+- **인계**: 임대가 만료된 doing 티켓은 같은 역할의 다른 세션이 `build/tk claim` 으로 인계받는다(이전 세션은 `claim.prev` 에 남는다). 하니스는 실행기가 도는 동안 임대 절반마다 연장하고, 결과를 확정(검증 뒤·브랜치 push·상태 전이)하기 전마다 원격 티켓의 claim 세대(`claim.by`·`claim.at`)가 아직 자기 것인지 본다 — 남이 인계했으면 상태를 바꾸지 않고 작업물은 `lost/<티켓>-<세션>` 브랜치로만 남긴다. 인계받은 세션은 티켓 notes·작업 브랜치부터 확인한다. 교대(같은 역할 새 세션)도 같다 — 진행 중 티켓·브랜치·남은 일을 한 줄로 넘긴다.
 - **멱등**: 같은 세션이 같은 티켓을 다시 claim·renew·resolve·close 해도 결과가 같다. 동기화·설치·상태 생성 스크립트는 두 번 돌려도 같은 상태가 되게 쓴다.
 - **검수자·최종 리뷰어가 여럿이면** 먼저 claim(검수 시작 기록의 push 성공)한 쪽이 판정·close 한다. 나중 쪽은 덧붙임 지적만 남긴다.
-- 역할표의 동시 수(`count`)를 넘겨 띄우지 않는다.
+- 역할표의 동시 수(`count`)를 넘겨 띄우지 않는다. 역할표는 하니스가 티켓마다(main 을 받은 직후) 다시 본다 — 원격에서 철회되면 그 자리에서 claim 을 멈춘다.
 
 ## 5. 결함 = 티켓 + 재현 TC
 1. 결함을 찾으면(누구든, 검수·재실행·운영 중) **티켓 1장 = 결함 1건**: `build/tk new --type defect --tc <TC 경로> …`. tc 가 없으면 거절된다. 티켓 체계(`tickets/`)가 없는 저장소는 `defects/D-NNNN.md`(머리말 id · title · status: open|resolved|closed · found_by · tc · fixed_in · reviewed_by)로 같은 규칙을 따른다.
 2. **재현 TC** — 결함이 있으면 비영 종료, 고치면 0. 형식은 `bash <tc> <임시폴더> [대상 저장소]` 를 권한다(대상 저장소 = 고치기 전 판을 `git archive` 로 내보낸 것 — 고치기 전 실패를 확인하는 데 쓴다). 수동 확인만으로는 결함 티켓을 만든 것으로 보지 않는다.
 3. 수정 → **전체 자동검수**(모든 TC + 회귀) 통과 → 작업자가 resolved: `build/tk resolve <티켓> <커밋…>`(→ review 상태, `fixed_in`).
-4. **최종 리뷰어**가 TC 재실행·코드로 확인 → `build/tk close <티켓> <이름>`(→ done, `reviewed_by`. close 는 TC 를 다시 돌려 실패하면 거절한다). 통과 못 하면 `build/tk reopen <티켓> <사유>`(→ open).
+4. **최종 리뷰어**가 TC 재실행·코드로 확인 → `build/tk close <티켓> <이름>`(→ done, `reviewed_by`. close 는 TC 를 다시 돌려 실패하면 거절한다). 통과 못 하면 `build/tk reopen <티켓> <사유>`(→ open). defect 의 done 진입은 이 경로뿐 — `tk done`·`tk move … done` 은 거절하고, `validate --all` 은 done 의 defect 에 `fixed_in`·`reviewed_by` 가 비면 오류.
 5. TC 는 지우지 않는다 — 회귀 묶음에 영구히 남아 같은 결함을 다시 눈으로 확인하지 않게 한다.
 6. 같은 종류 결함을 두 번째로 눈으로 찾았다면 그 자체가 결함이다(TC 가 없었던 것) — TC 추가 티켓을 연다.
 
