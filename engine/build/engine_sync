@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+"""엔진 동기화 — 매니페스트(.mawf.yaml)가 가리키는 엔진 판을 이 저장소에 받는다. 규칙: .mawf/WORKFLOW.md §7.
+혼자 돈다(표준 라이브러리만; PyYAML 이 있으면 쓴다) — docs 모드 저장소에는 엔진 build/ 가 없고 이 파일만 .mawf/engine_sync 로 있다.
+사용:
+  engine_sync              동기화. ref = 현재 엔진 버전이고 필요한 파일이 다 있으면 아무것도 안 함(네트워크도 안 씀)
+  engine_sync --check      쓰지 않고 상태만 한 줄(작업자 세션용)
+  engine_sync --roles      역할표 판정만 — 0 확정 · 3 미정(안내 한 줄) · 4 open-channel(대화 창구)
+  engine_sync --get <키>   매니페스트 값 한 개(점 경로, 예: runner.adapter). 없으면 빈 줄
+  engine_sync --runner-cfg [키]   작업자 실행기 설정(token_secret·node·git_name·git_email) — 매니페스트 runner.* > 어댑터 adapter.yaml > 기본값.
+                           키를 주면 그 값만, 없으면 「키=값」 줄들(하니스가 GITHUB_OUTPUT 에 붙인다)
+환경: MAWF_SYNC_TIMEOUT(가져오기 상한 초, 기본 25) · MAWF_ENGINE_SRC(이미 받아 둔 엔진 checkout — 가져오기 생략) · MAWF_NO_PYYAML=1(내장 해석기 강제, 시험용)
+출력 첫 줄: 역할표가 없거나 비면 「역할 미정 — 사용자와 역할표 확정 필요 …」. 실패해도 종료코드 0(--roles 제외) — 세션·하니스를 멈추지 않는다."""
+from __future__ import annotations
+import hashlib, os, re, shutil, subprocess, sys, tempfile
+from pathlib import Path
+
+ROOT = Path(os.environ.get("MAWF_ROOT") or Path(__file__).resolve().parent.parent)
+MANIFEST = ROOT / ".mawf.yaml"
+ROLES_UNDECIDED = "역할 미정 — 사용자와 역할표 확정 필요"
+ROLE_KEYS = ("orchestrator", "worker", "reviewer", "final_reviewer")
+# full 모드에서 엔진이 소유하는 경로(바뀐 파일 세기용) — install.sh 가 덮어쓰는 것과 같다
+FULL_PATHS = ["build", ".claude/settings.json", ".claude/skills/work", ".claude/skills/review",
+              ".github/workflows/harness.yml", ".github/workflows/release.yml", ".mawf", "ENGINE_VERSION"]
+DOCS_PATHS = [".mawf"]
+
+
+# ---------- 매니페스트 해석 (PyYAML 없을 때의 작은 부분집합: 들여쓰기 매핑·블록 목록·흐름 {…}/[…]·따옴표·주석) ----------
+def _strip_comment(line: str) -> str:
+    out, q = [], ""
+    for i, ch in enumerate(line):
+        if q:
+            if ch == q:
+                q = ""
+        elif ch in "'\"":
+            q = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _scalar(s: str):
+    s = s.strip()
+    if s == "" or s in ("~", "null"):
+        return None
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"":
+        return s[1:-1].replace("''", "'") if s[0] == "'" else s[1:-1]
+    if s.startswith("{") or s.startswith("["):
+        v, rest = _flow(s, 0)
+        return v
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    if s in ("true", "false"):
+        return s == "true"
+    return s
+
+
+def _flow(s: str, i: int):
+    """흐름 표기 {a: b, c: [x, y]} / [a, b] 를 i 부터 읽어 (값, 다음 위치)."""
+    def ws(j):
+        while j < len(s) and s[j] in " \t":
+            j += 1
+        return j
+
+    def atom(j, stops):
+        j = ws(j)
+        if j < len(s) and s[j] in "{[":
+            return _flow(s, j)
+        if j < len(s) and s[j] in "'\"":
+            q = s[j]; k = s.index(q, j + 1)
+            return s[j + 1:k], k + 1
+        k = j
+        while k < len(s) and s[k] not in stops:
+            k += 1
+        return _scalar(s[j:k]), k
+
+    i = ws(i)
+    if s[i] == "[":
+        out, i = [], i + 1
+        while True:
+            i = ws(i)
+            if s[i] == "]":
+                return out, i + 1
+            v, i = atom(i, ",]")
+            out.append(v); i = ws(i)
+            if s[i] == ",":
+                i += 1
+    out, i = {}, i + 1
+    while True:
+        i = ws(i)
+        if s[i] == "}":
+            return out, i + 1
+        k = i
+        while s[k] not in ":}":
+            k += 1
+        key = s[i:k].strip().strip("'\"")
+        if s[k] == "}":
+            out[key] = None; return out, k + 1
+        v, i = atom(k + 1, ",}")
+        out[key] = v; i = ws(i)
+        if s[i] == ",":
+            i += 1
+
+
+def mini_yaml(text: str):
+    lines = []
+    for raw in text.splitlines():
+        ln = _strip_comment(raw)
+        if ln.strip() and ln.strip() != "---":
+            lines.append((len(ln) - len(ln.lstrip(" ")), ln.strip()))
+
+    def block(idx, ind):
+        if idx >= len(lines):
+            return None, idx
+        if lines[idx][1].startswith("- ") or lines[idx][1] == "-":
+            out = []
+            while idx < len(lines) and lines[idx][0] == ind and (lines[idx][1].startswith("- ") or lines[idx][1] == "-"):
+                item = lines[idx][1][2:].strip() if lines[idx][1] != "-" else ""
+                idx += 1
+                if item == "" and idx < len(lines) and lines[idx][0] > ind:
+                    v, idx = block(idx, lines[idx][0]); out.append(v)
+                elif re.match(r"^[^{\['\"][^:]*:\s", item + " ") and not item.startswith(("{", "[")):
+                    # - key: value 꼴(목록 안 매핑) — 같은 들여쓰기의 이어지는 키를 묶는다
+                    sub = [(ind + 2, item)]
+                    while idx < len(lines) and lines[idx][0] > ind:
+                        sub.append(lines[idx]); idx += 1
+                    saved = lines[:]
+                    lines[:] = sub
+                    v, _ = block(0, ind + 2)
+                    lines[:] = saved
+                    out.append(v)
+                else:
+                    out.append(_scalar(item))
+            return out, idx
+        out = {}
+        while idx < len(lines) and lines[idx][0] == ind:
+            ln = lines[idx][1]
+            m = re.match(r"^(['\"]?)([^:'\"]+)\1\s*:(.*)$", ln)
+            if not m:
+                raise ValueError(f"해석 불가: {ln}")
+            key, rest = m.group(2).strip(), m.group(3).strip()
+            idx += 1
+            if rest == "":
+                if idx < len(lines) and lines[idx][0] > ind:
+                    out[key], idx = block(idx, lines[idx][0])
+                elif idx < len(lines) and lines[idx][0] == ind and lines[idx][1].startswith("- "):
+                    out[key], idx = block(idx, ind)
+                else:
+                    out[key] = None
+            else:
+                out[key] = _scalar(rest)
+        return out, idx
+
+    if not lines:
+        return {}
+    v, _ = block(0, lines[0][0])
+    return v
+
+
+def load_manifest():
+    """(매니페스트 dict | None, 오류 문구)."""
+    if not MANIFEST.exists():
+        return None, ""
+    text = MANIFEST.read_text(encoding="utf-8")
+    try:
+        if os.environ.get("MAWF_NO_PYYAML") != "1":
+            try:
+                import yaml  # type: ignore
+                return (yaml.safe_load(text) or {}), ""
+            except ImportError:
+                pass
+        return (mini_yaml(text) or {}), ""
+    except Exception as e:  # noqa: BLE001
+        return None, f"{MANIFEST.name} 해석 실패: {type(e).__name__}: {e}"
+
+
+def get(m: dict | None, dotted: str):
+    cur = m
+    for k in dotted.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            return None
+        cur = cur[k]
+    return cur
+
+
+# ---------- 역할표 ----------
+def roles_state(m: dict | None) -> tuple[str, str]:
+    """('ok'|'open-channel'|'undecided', 안내 한 줄)."""
+    where = "(.mawf.yaml roles · .mawf/WORKFLOW.md §1 「역할 배정」)"
+    if m is None:
+        return "undecided", f"{ROLES_UNDECIDED} — 매니페스트 .mawf.yaml 없음 {where}"
+    r = m.get("roles")
+    if isinstance(r, dict) and str(r.get("mode") or "").strip() == "open-channel":
+        return "open-channel", ""
+    if not r:
+        return "undecided", f"{ROLES_UNDECIDED} {where}"
+    if not isinstance(r, dict):
+        return "undecided", f"{ROLES_UNDECIDED} — roles 형식 오류(매핑이어야 함) {where}"
+    table = r.get("table")
+    if not table:
+        return "undecided", f"{ROLES_UNDECIDED} — roles.table 비어 있음 {where}"
+    if not str(r.get("confirmed") or "").strip():
+        return "undecided", f"{ROLES_UNDECIDED} — roles.confirmed(확정 시각·근거) 없음 {where}"
+    return "ok", ""
+
+
+# ---------- 동기화 ----------
+def norm_ver(ref: str) -> str:
+    ref = str(ref or "").strip()
+    return ref[1:] if re.fullmatch(r"v\d+\.\d+\.\d+.*", ref) else ref
+
+
+def cur_version(mode: str) -> str:
+    p = ROOT / ("ENGINE_VERSION" if mode == "full" else ".mawf/ENGINE_VERSION")
+    return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+
+
+def needed_files(mode: str, m: dict) -> list[Path]:
+    need = [ROOT / ".mawf/WORKFLOW.md"]
+    if mode == "full":
+        need += [ROOT / "build/tk", ROOT / "build/engine_sync", ROOT / ".claude/settings.json", ROOT / ".github/workflows/harness.yml"]
+        ad = str(get(m, "runner.adapter") or "").strip()
+        if ad:
+            mark = ROOT / ".mawf/runner/ADAPTER"
+            if not (mark.exists() and mark.read_text(encoding="utf-8").strip() == ad):
+                need.append(mark.with_name("ADAPTER.missing"))   # 없는 경로 → 동기화 필요
+    else:
+        need.append(ROOT / ".mawf/engine_sync")
+    return need
+
+
+def snapshot(paths: list[str]) -> dict[str, str]:
+    out = {}
+    for p in paths:
+        base = ROOT / p
+        files = [base] if base.is_file() else (sorted(x for x in base.rglob("*") if x.is_file()) if base.is_dir() else [])
+        for f in files:
+            if "__pycache__" in f.parts:
+                continue
+            out[str(f.relative_to(ROOT))] = hashlib.sha1(f.read_bytes()).hexdigest()
+    return out
+
+
+def repo_url(repo: str) -> tuple[str, str]:
+    """(clone 주소, 안내용 owner/repo)."""
+    repo = str(repo).strip()
+    p = Path(repo).expanduser()
+    if repo.startswith(("/", ".", "~")) or (p.exists() and p.is_dir()):
+        p = (ROOT / p).resolve() if not p.is_absolute() else p
+        return str(p), str(p)
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        return f"https://github.com/{repo}.git", repo
+    m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(\.git)?$", repo)
+    return repo, (m.group(1) if m else repo)
+
+
+def fetch(repo: str, ref: str, tmp: Path) -> tuple[Path | None, str]:
+    pre = os.environ.get("MAWF_ENGINE_SRC")
+    if pre:
+        return (Path(pre), "") if (Path(pre) / "ENGINE_VERSION").exists() else (None, f"MAWF_ENGINE_SRC 에 ENGINE_VERSION 없음: {pre}")
+    url, _ = repo_url(repo)
+    lp = Path(url)
+    if lp.is_dir() and not (lp / ".git").exists() and (lp / "ENGINE_VERSION").exists():
+        return lp, ""                                      # git 이 아닌 로컬 사본은 그대로
+    dest = tmp / "engine-src"
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    cmd = ["git", "clone", "-q", "--depth", "1"] + (["--branch", ref] if ref else []) + [("file://" + url) if lp.is_dir() else url, str(dest)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=int(os.environ.get("MAWF_SYNC_TIMEOUT", "25")), env=env)
+    except subprocess.TimeoutExpired:
+        return None, "시간 초과"
+    except OSError as e:
+        return None, str(e)
+    if r.returncode != 0:
+        return None, (r.stderr.strip().splitlines() or ["git clone 실패"])[-1][:160]
+    return dest, ""
+
+
+def copy_adapter(src: Path, m: dict) -> str:
+    ad = str(get(m, "runner.adapter") or "").strip()
+    dst = ROOT / ".mawf/runner"
+    if not ad:
+        return ""
+    s = src / "adapters" / ad
+    if not s.is_dir():
+        return f"어댑터 없음: adapters/{ad}"
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(s, dst)
+    (dst / "ADAPTER").write_text(ad + "\n", encoding="utf-8")
+    for f in dst.glob("*.sh"):
+        f.chmod(0o755)
+    return ""
+
+
+def apply(src: Path, mode: str, m: dict) -> str:
+    """src(엔진 checkout)를 ROOT 에 적용. 오류 문구(없으면 '')."""
+    ver = (src / "ENGINE_VERSION").read_text(encoding="utf-8").strip()
+    if mode == "full":
+        r = subprocess.run(["bash", str(src / "install.sh"), str(ROOT)], capture_output=True, text=True,
+                           env=dict(os.environ, MAWF_FROM_SYNC="1"))
+        if r.returncode != 0:
+            return "install.sh 실패: " + (r.stderr.strip().splitlines() or ["?"])[-1][:200]
+        return copy_adapter(src, m)
+    d = ROOT / ".mawf"
+    d.mkdir(exist_ok=True)
+    shutil.copy2(src / "engine/WORKFLOW.md", d / "WORKFLOW.md")
+    shutil.copy2(src / "engine/build/engine_sync", d / "engine_sync")
+    (d / "engine_sync").chmod(0o755)
+    (d / "ENGINE_VERSION").write_text(ver + "\n", encoding="utf-8")
+    return ""
+
+
+def self_cmd() -> str:
+    try:
+        return "python3 " + str(Path(__file__).resolve().relative_to(ROOT.resolve()))
+    except ValueError:
+        return "python3 " + str(Path(__file__).resolve())
+
+
+def sync(check: bool) -> int:
+    m, perr = load_manifest()
+    if perr:
+        print(f"엔진 동기화 건너뜀 — {perr}")
+        return 0
+    if m is None:
+        print("엔진 동기화 건너뜀 — 매니페스트 .mawf.yaml 없음(엔진 저장소 engine/.mawf.example.yaml 참고)")
+        return 0
+    repo, ref = get(m, "engine.repo"), str(get(m, "engine.ref") or "").strip()
+    mode = str(m.get("mode") or "full").strip()
+    if mode not in ("full", "docs"):
+        print(f"엔진 동기화 건너뜀 — mode 값 오류: {mode} (full|docs)")
+        return 0
+    if not repo or not ref:
+        print("엔진 동기화 건너뜀 — engine.repo · engine.ref 가 매니페스트에 없음")
+        return 0
+    cur, want = cur_version(mode), norm_ver(ref)
+    missing = [p for p in needed_files(mode, m) if not p.exists()]
+    if cur and cur == want and not missing:
+        print(f"엔진 {cur}({mode}) — 매니페스트 ref {ref} 와 같음, 변경 없음")
+        return 0
+    if check:
+        why = f"현재 {cur or '없음'} ≠ ref {ref}" if cur != want else f"파일 없음 {len(missing)}개"
+        print(f"엔진 동기화 필요({mode}) — {why}. 대화형 세션에서 {self_cmd()}")
+        return 0
+    _, short = repo_url(str(repo))
+    with tempfile.TemporaryDirectory() as td:
+        src, ferr = fetch(str(repo), ref, Path(td))
+        if src is None:
+            print(f"엔진 저장소에 닿지 못함({short}@{ref}: {ferr}) — 이 세션에 엔진 저장소를 붙인 뒤(클라우드: add_repo {short}) {self_cmd()} 다시 실행")
+            return 0
+        new = (src / "ENGINE_VERSION").read_text(encoding="utf-8").strip()
+        paths = FULL_PATHS if mode == "full" else DOCS_PATHS
+        before = snapshot(paths)
+        aerr = apply(src, mode, m)
+        if aerr:
+            print(f"엔진 동기화 실패 — {aerr}")
+            return 0
+        after = snapshot(paths)
+    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    if not changed:
+        print(f"엔진 {new}({mode}) — 받은 판과 같음, 변경 없음")
+    else:
+        head = ", ".join(changed[:8]) + (f" 외 {len(changed) - 8}개" if len(changed) > 8 else "")
+        print(f"엔진 {cur or '없음'} → {new}({mode}) 갱신 — 바뀐 파일 {len(changed)}개: {head}. 커밋 필요")
+    return 0
+
+
+RUNNER_DEFAULTS = {"token_secret": "", "node": "", "git_name": "mawf-harness", "git_email": "mawf-harness@users.noreply.github.com"}
+
+
+def runner_cfg(m: dict | None) -> dict:
+    out = dict(RUNNER_DEFAULTS)
+    ad = ROOT / ".mawf/runner/adapter.yaml"
+    if ad.exists():
+        try:
+            a = mini_yaml(ad.read_text(encoding="utf-8")) or {}
+            out.update({k: str(v) for k, v in a.items() if k in out and v not in (None, "")})
+        except Exception:  # noqa: BLE001
+            pass
+    r = get(m, "runner") if m else None
+    if isinstance(r, dict):
+        out.update({k: str(v) for k, v in r.items() if k in out and v not in (None, "")})
+    return out
+
+
+def main(argv: list[str]) -> int:
+    m, perr = load_manifest()
+    if argv[:1] == ["--runner-cfg"]:
+        cfg = runner_cfg(m)
+        if len(argv) > 1:
+            print(cfg.get(argv[1], ""))
+        else:
+            print("\n".join(f"{k}={v}" for k, v in cfg.items()))
+        return 0
+    if argv[:1] == ["--get"]:
+        if len(argv) < 2:
+            print(__doc__, file=sys.stderr); return 2
+        v = get(m, argv[1]) if m else None
+        print("" if v is None else v)
+        return 0
+    st, line = roles_state(m) if not perr else ("undecided", f"{ROLES_UNDECIDED} — {perr}")
+    if argv[:1] == ["--roles"]:
+        if line:
+            print(line)
+        return {"ok": 0, "undecided": 3, "open-channel": 4}[st]
+    if argv and argv[0] not in ("--check",):
+        print(__doc__, file=sys.stderr); return 2
+    if line:
+        print(line)                     # 첫 줄 — 역할 미정 안내
+    return sync(check=bool(argv))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
