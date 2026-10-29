@@ -77,10 +77,10 @@ lost() {        # lost <단계> — 다른 세션이 인계했다: 상태를 바
   fi
   git checkout -q -f "$MAIN" 2>/dev/null; sync_main; git branch -q -D "$BR" 2>/dev/null; rm -f "runs/$T.lost"
 }
-renew_loop() {  # renew_loop <티켓> <실행기 pid> — 실행기가 도는 동안 임대 절반마다 tk renew(별도 worktree → main push). 남이 인계했으면 실행기를 끝낸다
-  local t=$1 pid=$2 every rw
+renew_loop() {  # renew_loop <티켓> <실행기 pid> <worktree> — 실행기가 도는 동안 임대 절반마다 tk renew(별도 worktree → main push). 남이 인계했으면 실행기를 끝낸다
+  local t=$1 pid=$2 rw=$3 every                # worktree 는 부모가 만들고 지운다 — 이 루프는 TERM 으로 끝나므로 스스로 못 치운다
+  [ -n "$rw" ] || return 0
   every=${MAWF_RENEW_SEC:-$(( $(python3 -c "import sys; sys.path.insert(0, 'build'); import lib; print(lib.lease_min(lib.load_ticket('$t')))") * 30 ))}
-  rw=$(mktemp -d) && git worktree add -q --detach "$rw" "origin/$MAIN" 2>/dev/null || { rm -rf "$rw"; return 0; }
   while kill -0 "$pid" 2>/dev/null; do
     sleep "$every"; kill -0 "$pid" 2>/dev/null || break
     ( cd "$rw" && git fetch -q origin "$MAIN" && git reset -q --hard "origin/$MAIN" ) || continue
@@ -93,7 +93,19 @@ renew_loop() {  # renew_loop <티켓> <실행기 pid> — 실행기가 도는 �
         && { git diff --cached --quiet || { git commit -qm "renew $t ($HARNESS_RUNNER)" && git push -q origin "HEAD:$MAIN"; }; } ) > /dev/null 2>&1 \
       || log "임대 연장 실패(push 경합 등) — 다음 차례에 다시"
   done
-  git worktree remove --force "$rw" 2>/dev/null; rm -rf "$rw"
+}
+fenced() {      # fenced <커밋 메시지> <전이 함수> — 상태 전이를 claim 세대 확인 뒤에만 만들고 push. 거절되면 rebase 로 다시 얹지 않고
+                # 원격 최신 판을 받아 claim 을 다시 본 뒤 전이를 새로 만든다(남이 인계했으면 안 함). 3회까지
+  local msg=$1 fn=$2 i
+  for i in 1 2 3; do
+    if [ "$(claim_gen "$T")" != "$MYGEN" ]; then log "티켓 $T 은 그새 다른 세션이 인계(claim $(claim_gen "$T")) — 상태 전이 안 함"; return 1; fi
+    "$fn" || { log "상태 전이 실패($fn) — 그대로 둠"; sync_main; return 1; }
+    git add -A && git commit -qm "$msg" || return 0
+    git push -q origin "$MAIN" && return 0
+    log "상태 전이 push 거절 — 원격 최신 판에서 claim 을 다시 보고 다시 만든다($i)"
+    sync_main
+  done
+  log "상태 전이 push 3회 거절 — 그대로 둠(다음 실행 또는 사람)"; return 1
 }
 
 n=0
@@ -120,9 +132,11 @@ while [ "$n" -lt "$MAX_TICKETS" ]; do
     MAXT=$(python3 -c "import yaml,sys;print((yaml.safe_load(open('tickets/doing/$T.yaml')).get('limits') or {}).get('max_turns',40))")
     rm -f "runs/$T.runner_error" "runs/$T.lost"
     TICKET="$T" MAX_TURNS="$MAXT" RUNS_DIR="$ROOT/runs" setsid bash "$RUNNER" "$T" > "runs/$T.log" 2>&1 & RPID=$!
-    renew_loop "$T" "$RPID" & RNPID=$!
+    RW=$(mktemp -d) && git worktree add -q --detach "$RW" "origin/$MAIN" 2>/dev/null || { rm -rf "$RW"; RW=; }
+    renew_loop "$T" "$RPID" "$RW" 2>/dev/null & RNPID=$!   # stderr 는 버림 — 끝낼 때 sleep 이 죽으며 「Terminated」 를 적는다
     wait "$RPID"; rc=$?
-    kill "$RNPID" 2>/dev/null; wait "$RNPID" 2>/dev/null
+    { pkill -P "$RNPID"; kill "$RNPID"; wait "$RNPID"; } 2>/dev/null
+    [ -n "$RW" ] && { git worktree remove --force "$RW" 2>/dev/null; rm -rf "$RW"; }; git worktree prune 2>/dev/null
     tail -3 "runs/$T.log" 2>/dev/null | sed 's/^/  │ /'
   fi
   log "작업자 rc=$rc"
@@ -132,10 +146,8 @@ while [ "$n" -lt "$MAX_TICKETS" ]; do
     ERRMSG=$(head -c 200 "runs/$T.runner_error" 2>/dev/null || echo "사유 없음")
     log "실행기 장애: $ERRMSG — 티켓 $T 되돌림(반려 아님), 실행 종료"
     git checkout -q "$MAIN" && sync_main && git branch -q -D "$BR" 2>/dev/null
-    [ "$(claim_gen "$T")" = "$MYGEN" ] || { log "티켓 $T 은 그새 다른 세션이 인계 — 되돌리지 않음"; exit 2; }
-    python3 build/tk move "$T" open && python3 build/tk set "$T" claim.by "" >/dev/null 2>&1 || true
-    python3 build/tk set "$T" notes "[runner-fail $(date +%H:%M) $HARNESS_RUNNER] $ERRMSG"
-    push_main "unclaim $T (runner failure)"
+    tr_unclaim() { python3 build/tk move "$T" open && python3 build/tk set "$T" claim.by "" > /dev/null && python3 build/tk set "$T" notes "[runner-fail $(date +%H:%M) $HARNESS_RUNNER] $ERRMSG"; }
+    fenced "unclaim $T (runner failure, $HARNESS_RUNNER)" tr_unclaim
     echo "::error::실행기 장애 — $ERRMSG"
     exit 2
   fi
@@ -161,7 +173,8 @@ PY
     git add -A; git add -f "${EVID[@]}" 2>/dev/null; git commit -qm "work $T ($HARNESS_RUNNER)" || true   # runs/ 는 gitignore — PR 브랜치에만 증거로 싣는다
     if ! still_mine; then lost "검증 뒤(결과 확정 전)"; continue; fi
     if [ "${NO_PR:-0}" = "1" ]; then
-      git checkout -q "$MAIN" && git merge -q --ff-only "$BR" && python3 build/tk move "$T" review && { [ -n "$WNOTES" ] && python3 build/tk set "$T" notes "[worker] $WNOTES"; push_main "review $T (no-pr)"; } ; git branch -q -D "$BR"
+      tr_review_nopr() { git merge -q --no-edit "$BR" && python3 build/tk move "$T" review && { [ -z "$WNOTES" ] || python3 build/tk set "$T" notes "[worker] $WNOTES"; }; }
+      git checkout -q "$MAIN" && fenced "review $T (no-pr, $HARNESS_RUNNER)" tr_review_nopr; git branch -q -D "$BR" 2>/dev/null
     else
       git push -q -f origin "$BR"
       TITLE=$(python3 -c "import yaml;print(yaml.safe_load(open('tickets/doing/$T.yaml'))['title'])")
@@ -171,10 +184,8 @@ PY
       [ -z "$PR" ] && PR="(pr 생성 실패: $(tail -c 200 runs/$T.pr.err))"
       log "PR: $PR"
       git checkout -q "$MAIN" && sync_main
-      if [ "$(claim_gen "$T")" != "$MYGEN" ]; then log "티켓 $T 은 PR 뒤 다른 세션이 인계 — 상태 안 바꿈(PR $PR 은 남음)"; continue; fi
-      python3 build/tk set "$T" pr "$PR" && python3 build/tk move "$T" review
-      [ -n "$WNOTES" ] && python3 build/tk set "$T" notes "[worker] $WNOTES"
-      push_main "review $T → $PR"
+      tr_review() { python3 build/tk set "$T" pr "$PR" && python3 build/tk move "$T" review && { [ -z "$WNOTES" ] || python3 build/tk set "$T" notes "[worker] $WNOTES"; }; }
+      fenced "review $T → $PR ($HARNESS_RUNNER)" tr_review || log "PR $PR 은 남음 — 상태 안 바꿈"
     fi
   else
     log "validate 실패 — 반려"; head -20 "runs/$T.validate"
@@ -186,9 +197,9 @@ PY
     git add -A; git add -f "${EVID[@]}" 2>/dev/null; git commit -qm "rejected work $T (#$N, $HARNESS_RUNNER)" || true
     git push -q -f origin "$BR:rejected/$T-$N" 2>/dev/null && log "작업물 보존: rejected/$T-$N" || true
     git checkout -q "$MAIN" && sync_main && git branch -q -D "$BR" 2>/dev/null
-    [ "$(claim_gen "$T")" = "$MYGEN" ] || { log "티켓 $T 은 그새 다른 세션이 인계 — 반려 안 함"; continue; }
-    python3 build/tk reject "$T" "validate 오류 ${REASON}건 ($HARNESS_RUNNER) — $(grep '^오류' "runs/$T.validate" | head -3 | tr '\n' ' ') | worker: ${WNOTES:0:300}"
-    push_main "reject $T"
+    RMSG="validate 오류 ${REASON}건 ($HARNESS_RUNNER) — $(grep '^오류' "runs/$T.validate" | head -3 | tr '\n' ' ') | worker: ${WNOTES:0:300}"
+    tr_reject() { python3 build/tk reject "$T" "$RMSG"; }
+    fenced "reject $T ($HARNESS_RUNNER)" tr_reject
   fi
 done
 sync_main

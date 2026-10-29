@@ -32,14 +32,15 @@ take_over() {   # take_over <폴더> <방식> — B 가 인계: expire = 임대�
   done; return 1
 }
 remote_state() { local C=$1 p; p=$(git --git-dir="$C.remote.git" ls-tree -r --name-only main tickets/ | grep "$TID"); echo "$p $(git --git-dir="$C.remote.git" show "main:$p" | python3 -c 'import sys,yaml;print((yaml.safe_load(sys.stdin) or {}).get("claim",{}).get("by"))')"; }
-check() {       # check <폴더> <이름>
-  local C=$1 tag=$2
+check() {       # check <폴더> <이름> [pr-branch-ok] — PR 경로 경합(④)은 인계 전에 이미 t/<T> 를 정당하게 push 했다
+  local C=$1 tag=$2 brok=${3:-}
   echo '```'; sed 's/^/  /' "$W/$tag.log" | head -14; echo "[원격 main]"; git --git-dir="$C.remote.git" log --format='  %s' main | head -6
   echo "[원격 브랜치]"; git --git-dir="$C.remote.git" for-each-ref --format='  %(refname:short)' refs/heads; echo '```'
   expect_eq "$tag — 원격 티켓은 doing · claim = B" "tickets/doing/$TID.yaml B" "$(remote_state "$C")"
   expect_eq "$tag — A 의 review 전이 없음" 0 "$(git --git-dir="$C.remote.git" log --format=%s main | grep -c "^review $TID")"
-  expect "$tag — A 의 t/$TID 브랜치 push 없음" test -z "$(git --git-dir="$C.remote.git" for-each-ref "refs/heads/t/$TID")"
+  [ -n "$brok" ] || expect "$tag — A 의 t/$TID 브랜치 push 없음" test -z "$(git --git-dir="$C.remote.git" for-each-ref "refs/heads/t/$TID")"
   expect_grep "$tag — A 로그에 「인계 … 확정 중지/실행기 종료」" '인계' "$W/$tag.log"
+  expect_eq "$tag — 하니스가 끝난 뒤 임시 worktree 없음(renew 용)" 1 "$(git -C "$C-a" worktree list --porcelain | grep -c '^worktree ')"
 }
 
 echo "## 1. 실행기가 기다리는 사이 임대 만료 → B 가 tk claim(인계) → A 재개"
@@ -62,4 +63,31 @@ check "$C" s2
 expect_eq "s2 — 실행 중 임대 연장 커밋(renew … (A))" 1 "$([ "$(git --git-dir="$C.remote.git" log --format=%s main | grep -c "^renew $TID (A)")" -ge 1 ] && echo 1 || echo 0)"
 expect_nogrep "s2 — 실행기가 GO 전에 끝남(「실행기 끝」 없음)" '실행기 끝' "$C-a/runs/$TID.log"
 expect "s2 — 실행기 대기(25초)보다 빨리 끝남(${dt}초)" test "$dt" -lt 22
+
+# ③④ 상태 전이 push 경합(Cloud_codex1 PR #1 리뷰 P0): A 의 review 커밋 push 직전(pre-push 훅) B 가 인계 → A 의 첫 push 거절.
+#    A 가 rebase 로 같은 전이를 다시 얹으면 원격이 「review · claim B」 가 된다. 기대: 원격 최신 판에서 claim 을 다시 보고 전이하지 않음
+race_case() {   # race_case <폴더> <이름> <NO_PR 값>
+  local C=$1 tag=$2 nopr=$3
+  setup_case "$C"; export GO="$W/go-$tag"; touch "$GO"
+  cat > "$C-a/.git/hooks/pre-push" << HOOK
+#!/bin/sh
+while read lref lsha rref rsha; do
+  if git log -1 --format=%s "\$lsha" 2>/dev/null | grep -q '^review $TID' && [ ! -e "$W/raced-$tag" ]; then
+    touch "$W/raced-$tag"
+    ( cd "$C-b" && git fetch -q origin main && git reset -q --hard origin/main \
+      && python3 build/tk set "$TID" claim.lease_until "2000-01-01 00:00" > /dev/null && python3 build/tk claim "$TID" B > /dev/null \
+      && git add -A && git commit -qm "takeover $TID (B)" && git push -q origin main ) > "$W/hook-$tag.log" 2>&1
+  fi
+done
+exit 0
+HOOK
+  chmod 755 "$C-a/.git/hooks/pre-push"
+  ( cd "$C-a" && PATH="$W/stub:$PATH" HARNESS_RUNNER=A MAWF_RENEW_SEC=3600 NO_PR=$nopr BUDGET_MIN=5 MAX_TICKETS=1 bash build/run_ticket.sh > "$W/$tag.log" 2>&1 )
+  expect "$tag — B 의 인계가 A 의 review push 사이에 일어남" test -e "$W/raced-$tag"
+  check "$C" "$tag" $([ "$nopr" = 0 ] && echo pr-branch-ok)
+}
+echo; echo "## 3. review 전이 push 경합 — NO_PR(main 직접)"
+race_case "$W/c3" s3 1
+echo; echo "## 4. review 전이 push 경합 — PR 경로"
+race_case "$W/c4" s4 0
 finish
