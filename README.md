@@ -29,7 +29,7 @@ cd /path/to/your-repo && git add -A && git commit -m "engine v1.1.0"
 engine: {repo: led2epplin/Github-MultiAgent-Workflow, ref: v1.1.0}
 mode: full          # full = build/·.claude/·워크플로·.mawf/ 갱신 / docs = .mawf/WORKFLOW.md 만(코드가 없는 저장소)
 ```
-`python3 build/engine_sync`(docs 모드는 `python3 .mawf/engine_sync`). ref 가 현재 `ENGINE_VERSION` 과 같으면 아무것도 안 하고, 엔진 저장소에 닿지 못하면(클라우드 프록시 등) 에러 대신 「저장소를 붙인 뒤 다시 실행」 한 줄. SessionStart 훅(`build/session_start`)이 대화형 세션마다 30초 상한으로 부르고, 하니스는 티켓 루프 전에 한 번 부른다.
+`python3 build/engine_sync`(docs 모드는 `python3 .mawf/engine_sync`). 엔진이 아직 없는 저장소(1.0.x 포함)의 첫 동기화는 그 저장소 폴더에서 `python3 <엔진 checkout>/engine/build/engine_sync`. ref 가 현재 `ENGINE_VERSION` 과 같으면 아무것도 안 하고, 엔진 저장소에 닿지 못하면(클라우드 프록시 등) 에러 대신 「저장소를 붙인 뒤 다시 실행」 한 줄. SessionStart 훅(`build/session_start`)이 대화형 세션마다 30초 상한으로 부르고, 하니스는 티켓 루프 전에 한 번 부른다.
 
 ## 원칙 (지키게 만드는 장치)
 | 원칙 | 장치 |
