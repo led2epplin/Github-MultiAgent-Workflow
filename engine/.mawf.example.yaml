@@ -1,0 +1,29 @@
+# 매니페스트 — 이 저장소가 Github-MultiAgent-Workflow 엔진을 어떻게 쓰는가. 규칙: .mawf/WORKFLOW.md §7
+# 이 파일은 프로젝트 소유다(동기화가 덮어쓰지 않는다). 이름·창구·비밀 이름 같은 저장소 고유값은 여기에만 둔다.
+engine:
+  repo: led2epplin/Github-MultiAgent-Workflow   # owner/repo · git URL · 로컬 경로
+  ref: v1.1.0                                    # 태그 권장 — 현재 엔진 버전과 같으면 동기화는 아무것도 안 한다
+mode: full                                       # full = 엔진 파일 전부 갱신 / docs = .mawf/WORKFLOW.md(+ .mawf/engine_sync)만
+
+# 역할표 — 사용자와 합의한 확정본만 적는다(WORKFLOW.md §1). 비어 있으면 「역할 미정」 안내가 뜨고 하니스는 claim 하지 않는다.
+roles: {}
+# 확정본 모양(자리표시 — 실제 세션 조건·벤더·권한은 사용자 합의로 채운다):
+# roles:
+#   confirmed: "<YYYY-MM-DD HH:MM 시간대> 사용자 확정 — 근거: <기록 문서 · 커밋>"
+#   table:
+#     orchestrator:   {sessions: "<조건 — 예: 대화형 세션>", count: 1, orders_from: [user]}
+#     worker:         {sessions: "<조건 — 예: 작업자 계열 세션, 클라우드/로컬 교체 가능>", count: 1, orders_from: [orchestrator, user], handover: "교대 시 인계"}
+#     reviewer:       {sessions: "<조건 — 작업자와 다른 계열>", count: 1, orders_from: [orchestrator, user], note: "지적만, 회신 1개 후 종료"}
+#     final_reviewer: {sessions: "<조건>", count: 1, orders_from: [user]}
+# 작업 지시가 오가지 않는 대화 창구 저장소:
+# roles: {mode: open-channel}
+
+# 회신 창구(선택) — 통신 도구가 읽는다
+# channel: {kind: github-issue, repo: "<owner/repo>", issue: "<번호>", default_to: "<오케스트레이터 세션 이름>"}
+
+# 작업자 실행기(mode full + 하니스) — WORKFLOW.md §8
+runner:
+  adapter: ""                                    # 엔진 저장소 adapters/<이름> — 동기화가 .mawf/runner/ 로 복사. 비우면 .mawf/runner.sh 를 직접 둔다
+  token_secret: ""                               # 하니스가 읽을 저장소 비밀 이름(비우면 어댑터 기본값)
+  git_name: mawf-harness                         # 하니스 커밋 작성자
+  git_email: mawf-harness@users.noreply.github.com
