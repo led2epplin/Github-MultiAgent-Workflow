@@ -16,14 +16,15 @@ MAIN=${MAIN_BRANCH:-main}
 START=$(date +%s)
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
-# 0) 역할표 — 사용자 합의 전에는 발주·claim 하지 않는다
-if [ -f build/engine_sync ]; then
-  ROLES_LINE=$(python3 build/engine_sync --roles); rrc=$?
-  if [ "$rrc" -ne 0 ]; then
-    if [ "$rrc" -eq 4 ]; then log "대화 창구 저장소(roles: open-channel) — 하니스 claim 없음, 종료"; else log "${ROLES_LINE:-역할 미정} — 하니스 claim 없음, 종료"; fi
-    exit 0
-  fi
-fi
+# 0) 역할표 — 사용자 합의 전(또는 철회 뒤)에는 발주·claim 하지 않는다. 루프마다 sync_main 뒤에 다시 본다(원격에서 철회될 수 있다, D-0002)
+roles_gate() {
+  [ -f build/engine_sync ] || return 0
+  local line rrc; line=$(python3 build/engine_sync --roles); rrc=$?
+  [ "$rrc" -eq 0 ] && return 0
+  if [ "$rrc" -eq 4 ]; then log "대화 창구 저장소(roles: open-channel) — 하니스 claim 없음, 종료"; else log "${line:-역할 미정} — 하니스 claim 없음, 종료"; fi
+  return 1
+}
+roles_gate || exit 0
 # 1) 작업자 실행기 — 없으면 claim 전에 멈춘다(티켓을 잡아 두고 못 돌리는 일 방지)
 RUNNER=""
 for r in .mawf/runner.sh .mawf/runner/runner.sh; do [ -f "$r" ] && { RUNNER=$r; break; }; done
@@ -54,6 +55,7 @@ n=0
 while [ "$n" -lt "$MAX_TICKETS" ]; do
   if [ "$(elapsed_min)" -ge "$BUDGET_MIN" ]; then log "시간 예산 ${BUDGET_MIN}분 소진 — 종료"; break; fi
   sync_main
+  roles_gate || exit 0
   T=$(python3 build/ready --one) || { log "ready 없음 — 종료"; break; }
   log "티켓 $T 집음"
   # 2) claim 을 main 에 먼저 올려 다른 세션과의 경합을 git 이 판정하게 한다
