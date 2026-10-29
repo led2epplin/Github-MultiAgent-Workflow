@@ -1,0 +1,6 @@
+# 작업자 실행기 어댑터 — Claude Code CLI. 엔진 계약: engine/WORKFLOW.md §8. 소비 저장소에서는 .mawf/runner/ 로 복사된다(엔진 소유, 갱신 때 덮어씀)
+name: claude-code
+token_secret: CLAUDE_CODE_OAUTH_TOKEN   # 하니스가 읽을 저장소 비밀 기본 이름(.mawf.yaml runner.token_secret 이 우선). 값은 claude setup-token 출력
+node: "22"                               # 하니스가 setup-node 로 준비할 버전
+# .mawf.yaml runner 의 이 어댑터 전용 키:
+#   allowed_tools_extra: "Bash(python3 domain/tools/*)"   작업자에게 더 허용할 도구(쉼표로 이음)

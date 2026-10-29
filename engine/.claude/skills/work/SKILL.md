@@ -1,6 +1,6 @@
 ---
 name: work
-description: 티켓 1장을 수행한다. 하니스가 `claude -p "/work T-xxxxxx"` 로 부른다. 인수 = 티켓 ID.
+description: 티켓 1장을 수행한다. 하니스의 작업자 실행기(.mawf/runner)가 `/work T-xxxxxx` 로 부른다. 인수 = 티켓 ID.
 ---
 
 # /work <티켓ID>

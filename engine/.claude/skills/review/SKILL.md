@@ -1,6 +1,6 @@
 ---
 name: review
-description: 검수자용. PR 또는 티켓의 산출물을 AGENTS.md 검사식으로 검수해 reviews/<ID>.md 에 「오류 n / 권고 m / 확인 k」를 쓴다. Codex 가 없을 때의 대체 검수자.
+description: 검수자용. PR 또는 티켓의 산출물을 AGENTS.md 검사식으로 검수해 reviews/<ID>.md 에 「오류 n / 권고 m / 확인 k」를 쓴다. 교차 검수자(작업자와 다른 계열)가 없을 때의 대체 검수자.
 ---
 
 # /review <티켓ID>

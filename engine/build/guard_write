@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse 훅 — Write/Edit 가 티켓 outputs 밖을 건드리면 차단(종료코드 2).
-stdin: Claude Code 훅 JSON ({tool_name, tool_input:{file_path}}). TICKET 환경변수 없으면 통과(대화형)."""
+stdin: 에이전트 도구의 PreToolUse 훅 JSON ({tool_name, tool_input:{file_path}}). TICKET 환경변수 없으면 통과(대화형)."""
 import os, sys, json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
