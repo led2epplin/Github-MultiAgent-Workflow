@@ -100,7 +100,8 @@ fenced() {      # fenced <커밋 메시지> <전이 함수> — 상태 전이를
   for i in 1 2 3; do
     if [ "$(claim_gen "$T")" != "$MYGEN" ]; then log "티켓 $T 은 그새 다른 세션이 인계(claim $(claim_gen "$T")) — 상태 전이 안 함"; return 1; fi
     "$fn" || { log "상태 전이 실패($fn) — 그대로 둠"; sync_main; return 1; }
-    git add -A && git commit -qm "$msg" || return 0
+    git add -A; git commit -qm "$msg" > /dev/null 2>&1
+    [ "$(git rev-list --count "origin/$MAIN..HEAD" 2>/dev/null || echo 1)" = 0 ] && return 0   # 올릴 것이 없음
     git push -q origin "$MAIN" && return 0
     log "상태 전이 push 거절 — 원격 최신 판에서 claim 을 다시 보고 다시 만든다($i)"
     sync_main
