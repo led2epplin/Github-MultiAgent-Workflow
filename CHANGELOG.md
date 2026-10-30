@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## 1.2.1 (2026-10-30)
+- D-0010 `validate --all` 이 review·done 티켓의 「inputs 합계 > read_kb」 를 오류로 셈 → read_kb(작업자가 실행할 때 읽는 한도) 초과는 실행 대상(open·doing)만 오류, 다시 실행될 수 있는 hold·stranded 는 권고, 끝난 review·done 은 검사하지 않는다. 소비 저장소가 동기화 전부터 done 티켓 오류로 `validate --all` 을 통과하지 못하던 것(ORDER-34).
+
 ## 1.2.0 (2026-10-30)
 태그 없이 엔진 판 고정(ORDER-33) — 이 환경에서 태그 push·Releases API 가 막혀 매번 사용자가 웹에서 태그를 만들어야 했다.
 - `engine.ref` 가 40자 커밋 해시면 `engine_sync` 가 `git clone --branch` 대신 `git init` + `git fetch --depth 1 <원격> <sha>` + `checkout FETCH_HEAD` 로 받는다. 받은 커밋을 확인해 `.mawf/ENGINE_REF` 에 적고, 다음 실행은 이것과 비교해 같으면 네트워크 없이 「변경 없음」. 갱신 안내의 버전은 그 판의 `ENGINE_VERSION`.
