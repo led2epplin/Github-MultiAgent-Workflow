@@ -76,10 +76,19 @@ def cmd_renew(tid, who):
     save_ticket(t); print(f"{tid} 임대 연장 → {c['lease_until']}")
 
 
+def _no_defect_done(t, how):
+    """defect 의 done 진입은 tk close(tc 재실행 + reviewed_by)로만 — WORKFLOW.md §5, D-0004."""
+    if t.get("type") == "defect":
+        die(f"{t['id']} 는 defect — {how} 로 done 에 넣지 않는다. 최종 리뷰어가 build/tk close {t['id']} <이름> (tc 재실행 뒤 done)")
+
+
 def cmd_move(tid, state):
     if state not in TICKET_STATES:
         die(f"state 오류: {state}")
-    t = load_ticket(tid); save_ticket(t, state); print(f"{tid} → {state}")
+    t = load_ticket(tid)
+    if state == "done":
+        _no_defect_done(t, "tk move done")
+    save_ticket(t, state); print(f"{tid} → {state}")
 
 
 def cmd_reject(tid, reason):
@@ -92,7 +101,8 @@ def cmd_reject(tid, reason):
 
 
 def cmd_done(tid):
-    t = load_ticket(tid); t["closed"] = now(); save_ticket(t, "done"); print(f"{tid} → done")
+    t = load_ticket(tid); _no_defect_done(t, "tk done")
+    t["closed"] = now(); save_ticket(t, "done"); print(f"{tid} → done")
 
 
 def _defect(tid):

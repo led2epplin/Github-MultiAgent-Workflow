@@ -38,6 +38,10 @@ def validate_ticket(f: Path):
         err(f, "dod 에 tc 가 있는데 tc 경로 없음")
     if tc and not (ROOT / tc).is_file() and tc not in [str(o) for o in (t.get("outputs") or [])]:
         err(f, f"tc 파일 없음: {tc}")
+    if t.get("type") == "defect" and f.parent.name == "done":   # done = closed — tk close 를 거친 흔적이 있어야(D-0004)
+        for k in ("fixed_in", "reviewed_by"):
+            if not str(t.get(k) or "").strip():
+                err(f, f"done(closed) defect 에 {k} 없음 — build/tk resolve·close 를 거치지 않았다(tk reopen 후 다시)")
     protected = (".claude/", "build/", ".github/", "STATUS.md", "VERSION", "ENGINE_VERSION", "tickets/")
     if t.get("type") != "process":
         for o in t.get("outputs") or []:
