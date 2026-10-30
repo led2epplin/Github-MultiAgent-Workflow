@@ -3,7 +3,7 @@
 혼자 돈다(표준 라이브러리만; PyYAML 이 있으면 쓴다) — docs 모드 저장소에는 엔진 build/ 가 없고 이 파일만 .mawf/engine_sync 로 있다.
 사용:
   engine_sync              동기화. ref = 현재 엔진 버전이고 필요한 파일이 다 있으면 아무것도 안 함(네트워크도 안 씀)
-                           ref 가 40자 커밋 해시면 그 커밋을 받고 .mawf/ENGINE_REF 에 적는다 — 같은 해시면 아무것도 안 함
+                           ref 가 40자 커밋 해시면 그 커밋을 받고(받은 판이 그 커밋인지 확인) .mawf/ENGINE_REF 에 「해시 모드」로 적는다 — 같으면 아무것도 안 함
   engine_sync --check      쓰지 않고 상태만 한 줄(작업자 세션용)
   engine_sync --roles      역할표 판정만 — 0 확정 · 3 미정(안내 한 줄) · 4 open-channel(대화 창구)
   engine_sync --get <키>   매니페스트 값 한 개(점 경로, 예: runner.adapter). 없으면 빈 줄
@@ -228,12 +228,14 @@ def is_sha(ref: str) -> bool:
     return bool(re.fullmatch(r"[0-9a-fA-F]{40}", str(ref or "").strip()))
 
 
-REF_FILE = ".mawf/ENGINE_REF"   # 마지막으로 받은 커밋 해시(ref 가 해시일 때만)
+REF_FILE = ".mawf/ENGINE_REF"   # 「<받은 커밋 해시> <모드>」 한 줄(ref 가 해시일 때만) — full·docs 가 갱신하는 파일이 달라 모드도 적는다
 
 
-def cur_ref() -> str:
+def cur_ref(mode: str) -> str:
+    """이 모드로 마지막에 받은 커밋 해시. 기록이 없거나 다른 모드로 받은 것이면 ''."""
     p = ROOT / REF_FILE
-    return p.read_text(encoding="utf-8").strip().lower() if p.exists() else ""
+    parts = p.read_text(encoding="utf-8").split() if p.exists() else []
+    return parts[0].lower() if len(parts) == 2 and parts[1] == mode else ""
 
 
 def cur_version(mode: str) -> str:
@@ -311,12 +313,15 @@ def fetch(repo: str, ref: str, tmp: Path) -> tuple[Path | None, str]:
 
 
 def head_sha(src: Path) -> str:
-    """받은 엔진 checkout 의 커밋 해시(git 이 아니면 '')."""
+    """받은 엔진 checkout 의 커밋 해시. src 가 git 저장소 뿌리가 아니면(git 이 아닌 사본·다른 저장소 안의 폴더) ''."""
     try:
-        r = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        r = subprocess.run(["git", "-C", str(src), "rev-parse", "--show-toplevel", "HEAD"], capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    return r.stdout.strip().lower() if r.returncode == 0 else ""
+    out = r.stdout.split()
+    if r.returncode != 0 or len(out) != 2 or Path(out[0]).resolve() != src.resolve():
+        return ""
+    return out[1].lower()
 
 
 def copy_adapter(src: Path, m: dict) -> str:
@@ -379,7 +384,7 @@ def sync(check: bool) -> int:
         return 0
     sha = is_sha(ref)
     cur, want = cur_version(mode), norm_ver(ref)
-    have = cur_ref() if sha else cur      # 해시 ref 는 마지막으로 받은 커밋(.mawf/ENGINE_REF)과, 태그·브랜치는 엔진 버전과 비교
+    have = cur_ref(mode) if sha else cur      # 해시 ref 는 마지막으로 받은 커밋(.mawf/ENGINE_REF)과, 태그·브랜치는 엔진 버전과 비교
     want = ref.lower() if sha else want
     shown = ref[:12] if sha else ref
     missing = [p for p in needed_files(mode, m) if not p.exists()]
@@ -400,8 +405,8 @@ def sync(check: bool) -> int:
         new = (src / "ENGINE_VERSION").read_text(encoding="utf-8").strip()
         paths = FULL_PATHS if mode == "full" else DOCS_PATHS
         got = head_sha(src)
-        if sha and got and got != ref.lower():
-            print(f"엔진 동기화 실패 — 받은 커밋 {got[:12]} ≠ ref {shown}")
+        if sha and got != ref.lower():     # 해시 고정 — 받은 판이 그 커밋인지 확인하지 못하면 적용하지 않는다(git 이 아닌 사본 포함)
+            print(f"엔진 동기화 실패 — 받은 판의 커밋 {got[:12] or '확인 불가(git checkout 아님)'} ≠ ref {shown}. 기존 파일 그대로")
             return 0
         before = snapshot(paths)
         aerr = apply(src, mode, m)
@@ -409,10 +414,10 @@ def sync(check: bool) -> int:
             print(f"엔진 동기화 실패 — {aerr}")
             return 0
         rf = ROOT / REF_FILE
-        if sha and got:                    # 받은 커밋을 확인했을 때만 기록 — 다음 실행은 이것과 비교해 네트워크 없이 끝난다
+        if sha:                            # 확인한 커밋 + 모드 — 다음 실행은 이것과 비교해 네트워크 없이 끝난다
             rf.parent.mkdir(exist_ok=True)
-            rf.write_text(got + "\n", encoding="utf-8")
-        elif rf.exists():                  # 태그·브랜치로 돌아가거나 확인 못 한 판 — 옛 기록은 지운다
+            rf.write_text(f"{got} {mode}\n", encoding="utf-8")
+        elif rf.exists():                  # 태그·브랜치로 받은 판 — 옛 기록은 지운다
             rf.unlink()
         after = snapshot(paths)
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))

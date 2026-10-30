@@ -117,7 +117,7 @@ for mode in docs full; do
   expect "sha($mode) — .mawf/WORKFLOW.md = 엔진 판" cmp -s "$W/eng/engine/WORKFLOW.md" "$d/.mawf/WORKFLOW.md"
   vf="$d/ENGINE_VERSION"; [ "$mode" = docs ] && vf="$d/.mawf/ENGINE_VERSION"
   expect_eq "sha($mode) — 판의 ENGINE_VERSION = $V" "$V" "$(cat "$vf" 2>/dev/null)"
-  expect_eq "sha($mode) — 받은 판 기록(.mawf/ENGINE_REF) = sha" "$SHA" "$(cat "$d/.mawf/ENGINE_REF" 2>/dev/null)"
+  expect_eq "sha($mode) — 받은 판 기록(.mawf/ENGINE_REF) = 「sha 모드」" "$SHA $mode" "$(cat "$d/.mawf/ENGINE_REF" 2>/dev/null)"
   (cd "$d" && git add -A && git commit -qm "sha sync")
   mv "$W/eng-bare.git" "$W/eng-bare.off"                       # 원격을 치워 네트워크(가져오기)가 없음을 보인다
   sync_cmd="python3 .mawf/engine_sync"; [ "$mode" = full ] && sync_cmd="python3 build/engine_sync"
@@ -129,17 +129,41 @@ for mode in docs full; do
   expect_eq "sha($mode) 재실행 — 작업 트리 무변경" "" "$(git -C "$d" status --porcelain)"
 done
 # 다른 sha(예전 판) 로 바꾸면 다시 받는다 — 판 이동이 동작하는지
-git -C "$W/eng" commit -q --allow-empty -m "다음 판(시험)"; git -C "$W/eng" push -q "$W/eng-bare.git" HEAD:refs/heads/main 2>/dev/null || git --git-dir="$W/eng-bare.git" fetch -q "$W/eng" HEAD:refs/heads/main
+echo "# 다음 판(시험)" >> "$W/eng/engine/build/tk"                # full 이 소유하는 파일이 바뀐 판
+git -C "$W/eng" commit -qam "다음 판(시험)"; git -C "$W/eng" push -q "$W/eng-bare.git" HEAD:refs/heads/main 2>/dev/null || git --git-dir="$W/eng-bare.git" fetch -q "$W/eng" HEAD:refs/heads/main
 SHA2=$(git -C "$W/eng" rev-parse HEAD)
 manifest "$W/sha-docs" "$W/eng-bare.git" "$SHA2" docs 'roles: {mode: open-channel}'
 (cd "$W/sha-docs" && python3 .mawf/engine_sync --check) > "$W/sha3c.out" 2>&1; show "$W/sha3c.out"
 expect_grep "--check — 받은 커밋 ≠ ref 안내" "동기화 필요\(docs\) — 받은 커밋 ${SHA:0:12} ≠ ref ${SHA2:0:12}" "$W/sha3c.out"
-expect_eq "--check 는 쓰지 않음(기록 그대로)" "$SHA" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
+expect_eq "--check 는 쓰지 않음(기록 그대로)" "$SHA docs" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
 (cd "$W/sha-docs" && python3 .mawf/engine_sync) > "$W/sha3.out" 2>&1; show "$W/sha3.out"
-expect_eq "sha 바꾸면 다시 받아 기록 갱신" "$SHA2" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
+expect_eq "sha 바꾸면 다시 받아 기록 갱신" "$SHA2 docs" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
 expect_grep "sha 바꾼 갱신 — 바뀐 파일에 .mawf/ENGINE_REF" '갱신 — 바뀐 파일 .*\.mawf/ENGINE_REF' "$W/sha3.out"
 # 태그 ref 는 지금 그대로 — 버전 비교(같으면 네트워크 없이 「변경 없음」)
 manifest "$W/sha-docs" "$W/eng-bare.git" "v$V" docs 'roles: {mode: open-channel}'
 (cd "$W/sha-docs" && python3 .mawf/engine_sync) > "$W/sha4.out" 2>&1; show "$W/sha4.out"
 expect_grep "태그 ref(v$V) — 버전이 같으면 「변경 없음」" "매니페스트 ref v$V 와 같음, 변경 없음" "$W/sha4.out"
+
+echo; echo "## 7. 해시 ref — 받은 판이 그 커밋인지 확인 못 하면 적용하지 않음(PR #2 리뷰)"
+mkdir -p "$W/eng-nogit"; git -C "$W/eng" archive "$SHA2" | tar -x -C "$W/eng-nogit"   # git 이 아닌 사본(커밋 SHA2 의 파일)
+d="$W/sha-nogit"; consumer "$d"; manifest "$d" "$W/eng-nogit" "$SHA" docs 'roles: {mode: open-channel}'
+(cd "$d" && python3 "$W/eng/engine/build/engine_sync") > "$W/sha5.out" 2>&1; rc=$?; show "$W/sha5.out"
+expect_eq "git 아닌 사본 + 해시 ref — exit 0" 0 "$rc"
+expect_grep "git 아닌 사본 — 「동기화 실패 … 확인 불가」" '동기화 실패 — 받은 판의 커밋 확인 불가' "$W/sha5.out"
+expect "git 아닌 사본 — 아무것도 쓰지 않음(.mawf 없음)" test ! -e "$d/.mawf"
+manifest "$d" "$W/eng-bare.git" "$SHA" docs 'roles: {mode: open-channel}'
+(cd "$d" && MAWF_ENGINE_SRC="$W/eng" python3 "$W/eng/engine/build/engine_sync") > "$W/sha6.out" 2>&1; show "$W/sha6.out"   # 받아 둔 checkout 이 다른 커밋(SHA2)
+expect_grep "MAWF_ENGINE_SRC 가 다른 커밋 — 「받은 판의 커밋 ≠ ref」" "동기화 실패 — 받은 판의 커밋 ${SHA2:0:12} ≠ ref ${SHA:0:12}" "$W/sha6.out"
+expect "MAWF_ENGINE_SRC 다른 커밋 — 아무것도 쓰지 않음" test ! -e "$d/.mawf"
+
+echo; echo "## 8. 해시 ref — 모드를 바꿔 받은 기록이 다른 모드 파일을 최신으로 속이지 않음(PR #2 리뷰): full(A) → docs(B) → full(B)"
+d="$W/sha-full"                                                # §6 에서 full(SHA) 로 받아 커밋한 저장소
+manifest "$d" "$W/eng-bare.git" "$SHA2" docs 'roles: {mode: open-channel}'
+(cd "$d" && python3 build/engine_sync) > "$W/sha7.out" 2>&1; show "$W/sha7.out"
+expect_eq "docs(B) 뒤 build/tk 는 아직 A(cmp 다름)" 1 "$(cmp -s "$W/eng/engine/build/tk" "$d/build/tk"; echo $?)"
+manifest "$d" "$W/eng-bare.git" "$SHA2" full 'roles: {mode: open-channel}'
+(cd "$d" && python3 build/engine_sync) > "$W/sha8.out" 2>&1; show "$W/sha8.out"
+expect_nogrep "full(B) — 「변경 없음」 아님" '변경 없음' "$W/sha8.out"
+expect "full(B) — build/tk = B 판" cmp -s "$W/eng/engine/build/tk" "$d/build/tk"
+expect_eq "full(B) — 기록 = 「B full」" "$SHA2 full" "$(cat "$d/.mawf/ENGINE_REF" 2>/dev/null)"
 finish
