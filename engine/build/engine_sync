@@ -285,8 +285,13 @@ def repo_url(repo: str) -> tuple[str, str]:
 def fetch(repo: str, ref: str, tmp: Path) -> tuple[Path | None, str]:
     pre = os.environ.get("MAWF_ENGINE_SRC")
     if pre:
-        return (Path(pre), "") if (Path(pre) / "ENGINE_VERSION").exists() else (None, f"MAWF_ENGINE_SRC 에 ENGINE_VERSION 없음: {pre}")
-    url, _ = repo_url(repo)
+        if not (Path(pre) / "ENGINE_VERSION").exists():
+            return None, f"MAWF_ENGINE_SRC 에 ENGINE_VERSION 없음: {pre}"
+        if not (is_sha(ref) and head_sha(Path(pre))):
+            return Path(pre), ""
+        url = str(Path(pre).resolve())   # 해시 ref + git checkout — 작업 트리(미커밋 변경·다른 HEAD)가 아니라 그 커밋만 아래에서 꺼낸다
+    else:
+        url, _ = repo_url(repo)
     lp = Path(url)
     if lp.is_dir() and not (lp / ".git").exists() and (lp / "ENGINE_VERSION").exists():
         return lp, ""                                      # git 이 아닌 로컬 사본은 그대로
@@ -313,15 +318,18 @@ def fetch(repo: str, ref: str, tmp: Path) -> tuple[Path | None, str]:
 
 
 def head_sha(src: Path) -> str:
-    """받은 엔진 checkout 의 커밋 해시. src 가 git 저장소 뿌리가 아니면(git 이 아닌 사본·다른 저장소 안의 폴더) ''."""
-    try:
-        r = subprocess.run(["git", "-C", str(src), "rev-parse", "--show-toplevel", "HEAD"], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
+    """받은 엔진 checkout 의 커밋 해시. src 가 git 저장소 뿌리가 아니면(git 이 아닌 사본·다른 저장소 안의 폴더) ''.
+    경로와 HEAD 는 따로 조회한다 — 경로에 공백·줄바꿈이 있어도 섞이지 않게."""
+    def out(*args: str) -> str | None:
+        try:
+            r = subprocess.run(["git", "-C", str(src), "rev-parse", *args], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return r.stdout.rstrip("\n") if r.returncode == 0 else None
+    top = out("--show-toplevel")
+    if not top or Path(top).resolve() != src.resolve():
         return ""
-    out = r.stdout.split()
-    if r.returncode != 0 or len(out) != 2 or Path(out[0]).resolve() != src.resolve():
-        return ""
-    return out[1].lower()
+    return (out("HEAD") or "").strip().lower()
 
 
 def copy_adapter(src: Path, m: dict) -> str:

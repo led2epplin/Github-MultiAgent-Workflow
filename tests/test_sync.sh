@@ -152,9 +152,9 @@ expect_eq "git 아닌 사본 + 해시 ref — exit 0" 0 "$rc"
 expect_grep "git 아닌 사본 — 「동기화 실패 … 확인 불가」" '동기화 실패 — 받은 판의 커밋 확인 불가' "$W/sha5.out"
 expect "git 아닌 사본 — 아무것도 쓰지 않음(.mawf 없음)" test ! -e "$d/.mawf"
 manifest "$d" "$W/eng-bare.git" "$SHA" docs 'roles: {mode: open-channel}'
-(cd "$d" && MAWF_ENGINE_SRC="$W/eng" python3 "$W/eng/engine/build/engine_sync") > "$W/sha6.out" 2>&1; show "$W/sha6.out"   # 받아 둔 checkout 이 다른 커밋(SHA2)
-expect_grep "MAWF_ENGINE_SRC 가 다른 커밋 — 「받은 판의 커밋 ≠ ref」" "동기화 실패 — 받은 판의 커밋 ${SHA2:0:12} ≠ ref ${SHA:0:12}" "$W/sha6.out"
-expect "MAWF_ENGINE_SRC 다른 커밋 — 아무것도 쓰지 않음" test ! -e "$d/.mawf"
+(cd "$d" && MAWF_ENGINE_SRC="$W/eng" python3 "$W/eng/engine/build/engine_sync") > "$W/sha6.out" 2>&1; show "$W/sha6.out"   # 받아 둔 checkout 의 HEAD 가 다른 커밋(SHA2)
+expect_nogrep "MAWF_ENGINE_SRC HEAD ≠ ref — 실패 아님(그 checkout 에서 커밋 SHA 만 꺼냄, D-0008)" '동기화 실패' "$W/sha6.out"
+expect_eq "MAWF_ENGINE_SRC HEAD ≠ ref — 기록 = 「SHA docs」" "$SHA docs" "$(cat "$d/.mawf/ENGINE_REF" 2>/dev/null)"
 
 echo; echo "## 8. 해시 ref — 모드를 바꿔 받은 기록이 다른 모드 파일을 최신으로 속이지 않음(PR #2 리뷰): full(A) → docs(B) → full(B)"
 d="$W/sha-full"                                                # §6 에서 full(SHA) 로 받아 커밋한 저장소
