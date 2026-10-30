@@ -71,7 +71,7 @@ status: active
 | 키 | 뜻 |
 |---|---|
 | `engine.repo` | 엔진 저장소 — `owner/repo` · git URL · 로컬 경로 |
-| `engine.ref` | 태그(권장) 또는 브랜치. 현재 엔진 버전과 같으면 동기화는 아무것도 안 한다 |
+| `engine.ref` | 40자 커밋 해시(태그 없이 판 고정) · 태그 · 브랜치. 태그·브랜치는 현재 엔진 버전과 같으면, 해시는 마지막으로 받은 커밋(`.mawf/ENGINE_REF`)과 같으면 동기화는 아무것도 안 한다(네트워크도 안 씀) |
 | `mode` | `full` = 엔진 파일 전부(build/ · .claude/ · 워크플로 · `.mawf/`) 갱신 / `docs` = `.mawf/WORKFLOW.md` 와 `.mawf/engine_sync` 만 |
 | `roles` | 역할표(§1) 또는 `{mode: open-channel}` |
 | `channel` | (선택) 회신 창구 — 통신 도구가 읽는다 |
