@@ -53,7 +53,9 @@ status: active
 - 역할표의 동시 수(`count`)를 넘겨 띄우지 않는다. 역할표는 하니스가 티켓마다(main 을 받은 직후) 다시 본다 — 원격에서 철회되면 그 자리에서 claim 을 멈춘다.
 
 ## 5. 결함 = 티켓 + 재현 TC
-1. 결함을 찾으면(누구든, 검수·재실행·운영 중) **티켓 1장 = 결함 1건**: `build/tk new --type defect --tc <TC 경로> …`. tc 가 없으면 거절된다. 티켓 체계(`tickets/`)가 없는 저장소는 `defects/D-NNNN.md`(머리말 id · title · status: open|resolved|closed · found_by · tc · fixed_in · reviewed_by)로 같은 규칙을 따른다.
+1. 결함을 찾으면(누구든, 검수·재실행·운영 중) **티켓 1장 = 결함 1건**: `build/tk new --type defect --tc <TC 경로> --assignee <오케스트레이터 역할> …`. tc 가 없으면 거절된다. 티켓 체계(`tickets/`)가 없는 저장소는 `defects/D-NNNN.md`(머리말 id · title · status: open|resolved|closed · found_by · assignee · tc · fixed_in · reviewed_by)로 같은 규칙을 따른다.
+   - **등록 = 발견한 검수자**가 직접 한다(판정을 기다리지 않는다). `assignee` = 오케스트레이터 **역할**(역할표의 그 역할 — 세션 이름이 아니다). 오케스트레이터가 받아 작업자 배정·우선순위·마감 판정을 정한다(close 확인은 4. 의 최종 리뷰어). 고칠 곳이 `type defect` 로 쓸 수 없는 경로(엔진 보호 경로·소비 저장소 규칙)면 `type process` + `--dod tc` + `--tc` 로 같은 절차를 밟는다(제목 앞 「[결함]」).
+   - `validate` 는 결함 티켓(defect 또는 dod 에 tc)인데 `assignee` 가 비면 권고한다(done 제외).
 2. **재현 TC** — 결함이 있으면 비영 종료, 고치면 0. 형식은 `bash <tc> <임시폴더> [대상 저장소]` 를 권한다(대상 저장소 = 고치기 전 판을 `git archive` 로 내보낸 것 — 고치기 전 실패를 확인하는 데 쓴다). 수동 확인만으로는 결함 티켓을 만든 것으로 보지 않는다.
 3. 수정 → **전체 자동검수**(모든 TC + 회귀) 통과 → 작업자가 resolved: `build/tk resolve <티켓> <커밋…>`(→ review 상태, `fixed_in`).
 4. **최종 리뷰어**가 TC 재실행·코드로 확인 → `build/tk close <티켓> <이름>`(→ done, `reviewed_by`. close 는 TC 를 다시 돌려 실패하면 거절한다). 통과 못 하면 `build/tk reopen <티켓> <사유>`(→ open). defect 의 done 진입은 이 경로뿐 — `tk done`·`tk move … done` 은 거절하고, `validate --all` 은 done 의 defect 에 `fixed_in`·`reviewed_by` 가 비면 오류.

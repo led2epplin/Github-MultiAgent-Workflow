@@ -54,7 +54,7 @@ blocked_by: []  discovered_from: ""  claim: {by, at, lease_until}  pr: ""  rejec
 runner: ""      # 비우면 아무 실행 세션이나, 값이 있으면 그 이름으로 시작하는 HARNESS_RUNNER 만 집는다
 tc: ""          # type defect 는 필수 — 결함이면 비영 종료하는 재현 TC
 ```
-`build/tk new|claim|renew|move|reject|done|resolve|close|reopen|set|show`, `build/ready [--one]`. 상태 전이는 디렉터리 이동이고 커밋이 곧 메시지다.
+`build/tk new|claim|renew|move|reject|done|resolve|close|reopen|set|show`(결함은 `tk new --type defect --tc <TC> --assignee <오케스트레이터 역할>` — WORKFLOW §5), `build/ready [--one]`. 상태 전이는 디렉터리 이동이고 커밋이 곧 메시지다.
 
 ## 러너
 - **GitHub Actions(기본)**: `.github/workflows/harness.yml` — push·30분 cron·수동 실행, `concurrency: harness`. 매 실행이 새 우분투라 clone → 동기화 → 역할표 확인 → 실행기 준비(어댑터 `setup.sh`) → 루프 → push.

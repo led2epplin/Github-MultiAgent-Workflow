@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """티켓 조작 — 발급·claim·이동·반려·완료·결함 처리. 상태 = 디렉터리. 규칙: .mawf/WORKFLOW.md §4(다중 세션)·§5(결함)
 사용:
-  build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx] [--tc 경로]
+  build/tk new --type card --title "…" --goal "…" --inputs a,b --outputs c,d [--dod x,y] [--priority 2] [--blocked-by T-1,T-2] [--issue '#12'] [--from T-xxx] [--tc 경로] [--assignee 역할]
                type defect 는 --tc 필수(재현 TC — 결함이면 비영 종료). tc 파일이 아직 없으면 outputs 에 있어야 한다
+               결함(defect 또는 dod tc)은 발견한 검수자가 등록하고 --assignee 에 오케스트레이터 역할을 적는다(WORKFLOW.md §5)
   build/tk claim T-xxx <세션>        open → doing (임대 lease_until). 같은 세션이 다시 부르면 임대 연장(멱등), 임대 만료된 doing 은 인계(claim.prev)
   build/tk renew T-xxx <세션>        임대 연장(생존신고) — claim 한 세션만
   build/tk move  T-xxx <state>       임의 이동 (hold = 사람 입력 대기, ready 큐에서 빠짐)
@@ -26,6 +27,7 @@ def cmd_new(a):
     p.add_argument("--priority", type=int, default=2); p.add_argument("--blocked-by", default=""); p.add_argument("--issue", default="")
     p.add_argument("--from", dest="frm", default=""); p.add_argument("--read-kb", type=int, default=60); p.add_argument("--max-turns", type=int, default=40)
     p.add_argument("--tc", default="")
+    p.add_argument("--assignee", default="")
     o = p.parse_args(a)
     if o.type not in TICKET_TYPES:
         die(f"type 오류: {o.type}")
@@ -41,8 +43,8 @@ def cmd_new(a):
     t = {"id": new_ticket_id(o.title), "type": o.type, "title": o.title, "goal": o.goal, "issue": o.issue,
          "priority": o.priority, "inputs": sp(o.inputs), "outputs": outputs, "dod": dod,
          "limits": {"read_kb": o.read_kb, "max_turns": o.max_turns}, "blocked_by": sp(o.blocked_by), "blocks": [],
-         "parent": "", "discovered_from": o.frm, "claim": {"by": "", "at": ""}, "pr": "", "rejected": 0, "notes": "",
-         "created": today()}
+         "parent": "", "discovered_from": o.frm, "assignee": o.assignee.strip(), "claim": {"by": "", "at": ""}, "pr": "",
+         "rejected": 0, "notes": "", "created": today()}
     if tc:
         t["tc"] = tc
     if o.type == "defect":
