@@ -40,6 +40,24 @@ expect_eq "tk close 두 번(같은 리뷰어, 멱등)" 0 "$(run python3 build/tk
 expect_eq "tk reopen — open 으로" 0 "$(run python3 build/tk reopen "$TID" 다시 재현됨)"
 expect "reopen 뒤 open · reviewed_by 비움" grep -q "^reviewed_by: ''" "tickets/open/$TID.yaml"
 expect_eq "defect 가 아닌 티켓에 resolve — 거절" 1 "$(run python3 build/tk resolve "$(python3 build/tk new --type task --title t --goal g --outputs docs/x.md | cut -d' ' -f1)" abc)"
+# 등록 주체 = 발견한 검수자, assignee = 오케스트레이터 역할(ORDER-38) — 결함인데 assignee 가 비면 validate 권고(done 제외)
+run python3 build/validate --all > /dev/null
+expect_grep "assignee 없는 open defect — 권고" "^권고 tickets/open/$TID.yaml: 결함 티켓에 assignee 없음" "$W/o.txt"
+expect_eq "tk new --assignee — 생성" 0 "$(run python3 build/tk new --type defect --title 결함3 --goal 재현 --outputs docs/D-9003.md --tc tests/defects/D-9001.sh --assignee orchestrator)"
+AID=$(cut -d' ' -f1 "$W/o.txt")
+expect_grep "티켓에 assignee 기록" '^assignee: orchestrator' "tickets/open/$AID.yaml"
+expect_eq "tk new process + dod tc(assignee 없음) — 생성" 0 "$(run python3 build/tk new --type process --title '[결함] 엔진 보호 경로' --goal 재현 --outputs build/x.py --dod tc --tc tests/defects/D-9001.sh)"
+PID=$(cut -d' ' -f1 "$W/o.txt")
+run python3 build/validate --all > /dev/null
+expect_nogrep "assignee 있는 defect — 권고 없음" "^권고 tickets/open/$AID.yaml: .*assignee" "$W/o.txt"
+expect_grep "dod tc 인 process 도 결함 — assignee 없으면 권고" "^권고 tickets/open/$PID.yaml: 결함 티켓에 assignee 없음" "$W/o.txt"
+python3 build/tk set "$TID" assignee orchestrator > /dev/null
+run python3 build/validate --all > /dev/null
+expect_nogrep "tk set assignee 뒤 — 권고 사라짐" "^권고 tickets/open/$TID.yaml: .*assignee" "$W/o.txt"
+python3 build/tk set "$TID" assignee "" > /dev/null; touch FIXED; python3 build/tk resolve "$TID" abc1234 > /dev/null; python3 build/tk close "$TID" rv1 > /dev/null
+run python3 build/validate --all > /dev/null
+expect_nogrep "done(closed) defect 는 assignee 권고 안 함" "^권고 tickets/done/$TID.yaml: .*assignee" "$W/o.txt"
+python3 build/tk reopen "$TID" 시험 > /dev/null; rm -f FIXED
 # 티켓 파일을 손으로 고쳐 tc 를 지운 defect 는 validate --all 이 잡는다
 python3 - "$TID" << 'PY'
 import sys, yaml; p = f"tickets/open/{sys.argv[1]}.yaml"; t = yaml.safe_load(open(p)); t.pop("tc"); yaml.safe_dump(t, open(p, "w"), allow_unicode=True, sort_keys=False)

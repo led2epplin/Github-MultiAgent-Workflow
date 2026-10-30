@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 1.3.0 (2026-10-30)
+결함 등록 주체·담당(ORDER-38, 사용자 2026-10-30 19:28 「결함은 검수자가 등록 — assignee 를 오케스트레이터로」).
+- WORKFLOW §5: 결함은 **발견한 검수자**가 직접 등록(판정을 기다리지 않음), `assignee` = 오케스트레이터 **역할**(역할표의 역할, 세션 이름 아님) — 오케스트레이터가 배정·우선순위·마감 판정. 고칠 곳이 defect 로 쓸 수 없는 경로면 `type process` + `--dod tc` + `--tc`(제목 「[결함]」). `defects/D-NNNN.md` 머리말에도 `assignee`.
+- `build/tk new --assignee <역할>` → 티켓 필드 `assignee`(`tk set <T> assignee <역할>` 로도).
+- `build/validate`: 결함 티켓(type defect 또는 dod 에 tc)인데 `assignee` 가 비면 권고(done 제외).
+- `tests/test_defect.sh`: assignee 기록·권고·process+dod tc·set 뒤 권고 사라짐·done 제외(단언 35).
+
 ## 1.2.1 (2026-10-30)
 - D-0010 `validate --all` 이 review·done 티켓의 「inputs 합계 > read_kb」 를 오류로 셈 → read_kb(작업자가 실행할 때 읽는 한도) 초과는 실행 대상(open·doing)만 오류, 다시 실행될 수 있는 hold·stranded 는 권고, 끝난 review·done 은 검사하지 않는다. 소비 저장소가 동기화 전부터 done 티켓 오류로 `validate --all` 을 통과하지 못하던 것(ORDER-34).
 

@@ -38,6 +38,9 @@ def validate_ticket(f: Path):
         err(f, "dod 에 tc 가 있는데 tc 경로 없음")
     if tc and not (ROOT / tc).is_file() and tc not in [str(o) for o in (t.get("outputs") or [])]:
         err(f, f"tc 파일 없음: {tc}")
+    if (t.get("type") == "defect" or "tc" in (t.get("dod") or [])) and f.parent.name != "done" \
+            and not str(t.get("assignee") or "").strip():
+        warn(f, "결함 티켓에 assignee 없음 — 오케스트레이터 역할을 적는다(tk new --assignee, WORKFLOW.md §5)")
     if t.get("type") == "defect" and f.parent.name == "done":   # done = closed — tk close 를 거친 흔적이 있어야(D-0004)
         for k in ("fixed_in", "reviewed_by"):
             if not str(t.get(k) or "").strip():
