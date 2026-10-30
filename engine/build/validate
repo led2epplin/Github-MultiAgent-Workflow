@@ -68,8 +68,12 @@ def validate_ticket(f: Path):
                 err(f, f"inputs 선택자 해석 불가: {spec} ({type(e).__name__}: {e})")
         else:
             total += p.stat().st_size
-    if total > kb * 1024:
-        err(f, f"inputs 합계 {total//1024}KB > read_kb {kb}KB — 티켓을 쪼개거나 extract 로")
+    if total > kb * 1024:   # read_kb 는 작업자가 실행할 때 읽는 한도 — 실행 대상만 오류, 다시 실행될 수 있으면 권고, 끝난 티켓은 안 본다(D-0010)
+        st, msg = f.parent.name, f"inputs 합계 {total//1024}KB > read_kb {kb}KB — 티켓을 쪼개거나 extract 로"
+        if st in ("open", "doing"):
+            err(f, msg)
+        elif st in ("hold", "stranded"):
+            warn(f, msg + "(다시 open 하기 전에)")
     ids = {x["id"] for x in all_tickets()}
     for b in t.get("blocked_by") or []:
         if b not in ids:

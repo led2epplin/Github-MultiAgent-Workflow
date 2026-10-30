@@ -35,7 +35,7 @@ mode: full          # full = build/·.claude/·워크플로·.mawf/ 갱신 / doc
 | 원칙 | 장치 |
 |---|---|
 | 상태는 산출물 안에 | 티켓 = `tickets/<상태>/` 파일, STATUS.md 자동 생성, 대화에 상태 없음 |
-| 작업 단위는 작다 | 티켓 1장 = 산출물 1~2개, 읽기 상한 `limits.read_kb`, `build/extract` |
+| 작업 단위는 작다 | 티켓 1장 = 산출물 1~2개, 읽기 상한 `limits.read_kb`(실행 대상 open·doing 에서 넘으면 validate 오류), `build/extract` |
 | 인수인계는 생성한다 | `build/status`, SessionStart 훅이 STATUS·티켓·lessons 주입, 기동 프롬프트 고정(`CLAUDE.md`) |
 | 자기 검수 금지 | 작업자 ≠ 검수자, 검수 입력 = 산출물 + 검사식뿐 |
 | 완료는 하니스가 판정 | `build/validate` 통과 + 검수 오류 0 일 때만 병합. 반려 3회 → stranded |
