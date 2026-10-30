@@ -2,7 +2,7 @@
 # 이 파일은 프로젝트 소유다(동기화가 덮어쓰지 않는다). 이름·창구·비밀 이름 같은 저장소 고유값은 여기에만 둔다.
 engine:
   repo: led2epplin/Github-MultiAgent-Workflow   # owner/repo · git URL · 로컬 경로
-  ref: v1.1.0                                    # 태그 권장 — 현재 엔진 버전과 같으면 동기화는 아무것도 안 한다
+  ref: v1.2.0                                    # 40자 커밋 해시(태그 없이 고정) · 태그 · 브랜치 — 이미 받은 판이면 동기화는 아무것도 안 한다
 mode: full                                       # full = 엔진 파일 전부 갱신 / docs = .mawf/WORKFLOW.md(+ .mawf/engine_sync)만
 
 # 역할표 — 사용자와 합의한 확정본만 적는다(WORKFLOW.md §1). 비어 있으면 「역할 미정」 안내가 뜨고 하니스는 claim 하지 않는다.

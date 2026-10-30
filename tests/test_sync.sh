@@ -105,4 +105,41 @@ expect_eq "runner-cfg — 어댑터 기본 + 매니페스트 덮어쓰기" "toke
 printf '  token_secret: MY_TOKEN\n' >> "$W/full/.mawf.yaml"
 expect_eq "runner-cfg — token_secret 매니페스트 우선" MY_TOKEN "$(cd "$W/full" && python3 build/engine_sync --runner-cfg token_secret)"
 expect_eq "runner-cfg(어댑터 없음) — 기본 git_name" mawf-harness "$(cd "$W/docs" && python3 .mawf/engine_sync --runner-cfg git_name)"
+
+echo; echo "## 6. 태그 없이 커밋 해시로 판 고정(ORDER-33) — engine.ref = 40자 sha, 로컬 bare 원격"
+git clone -q --bare "$W/eng" "$W/eng-bare.git"; SHA=$(git --git-dir="$W/eng-bare.git" rev-parse HEAD)
+for mode in docs full; do
+  d="$W/sha-$mode"; consumer "$d"; manifest "$d" "$W/eng-bare.git" "$SHA" "$mode" 'roles: {mode: open-channel}'
+  # 첫 동기화 — 엔진 checkout 의 engine_sync
+  (cd "$d" && python3 "$W/eng/engine/build/engine_sync") > "$W/sha1-$mode.out" 2>&1; rc=$?; show "$W/sha1-$mode.out"
+  expect_eq "sha($mode) 첫 동기화 exit 0" 0 "$rc"
+  expect_grep "sha($mode) — 갱신 줄" "엔진 없음 → $V\($mode\) 갱신" "$W/sha1-$mode.out"
+  expect "sha($mode) — .mawf/WORKFLOW.md = 엔진 판" cmp -s "$W/eng/engine/WORKFLOW.md" "$d/.mawf/WORKFLOW.md"
+  vf="$d/ENGINE_VERSION"; [ "$mode" = docs ] && vf="$d/.mawf/ENGINE_VERSION"
+  expect_eq "sha($mode) — 판의 ENGINE_VERSION = $V" "$V" "$(cat "$vf" 2>/dev/null)"
+  expect_eq "sha($mode) — 받은 판 기록(.mawf/ENGINE_REF) = sha" "$SHA" "$(cat "$d/.mawf/ENGINE_REF" 2>/dev/null)"
+  (cd "$d" && git add -A && git commit -qm "sha sync")
+  mv "$W/eng-bare.git" "$W/eng-bare.off"                       # 원격을 치워 네트워크(가져오기)가 없음을 보인다
+  sync_cmd="python3 .mawf/engine_sync"; [ "$mode" = full ] && sync_cmd="python3 build/engine_sync"
+  (cd "$d" && $sync_cmd) > "$W/sha2-$mode.out" 2>&1; rc=$?; show "$W/sha2-$mode.out"
+  mv "$W/eng-bare.off" "$W/eng-bare.git"
+  expect_eq "sha($mode) 같은 sha 재실행(원격 없음) exit 0" 0 "$rc"
+  expect_grep "sha($mode) 재실행 — 「변경 없음」(가져오지 않음)" '변경 없음' "$W/sha2-$mode.out"
+  expect_nogrep "sha($mode) 재실행 — 「닿지 못함」 없음" '닿지 못함' "$W/sha2-$mode.out"
+  expect_eq "sha($mode) 재실행 — 작업 트리 무변경" "" "$(git -C "$d" status --porcelain)"
+done
+# 다른 sha(예전 판) 로 바꾸면 다시 받는다 — 판 이동이 동작하는지
+git -C "$W/eng" commit -q --allow-empty -m "다음 판(시험)"; git -C "$W/eng" push -q "$W/eng-bare.git" HEAD:refs/heads/main 2>/dev/null || git --git-dir="$W/eng-bare.git" fetch -q "$W/eng" HEAD:refs/heads/main
+SHA2=$(git -C "$W/eng" rev-parse HEAD)
+manifest "$W/sha-docs" "$W/eng-bare.git" "$SHA2" docs 'roles: {mode: open-channel}'
+(cd "$W/sha-docs" && python3 .mawf/engine_sync --check) > "$W/sha3c.out" 2>&1; show "$W/sha3c.out"
+expect_grep "--check — 받은 커밋 ≠ ref 안내" "동기화 필요\(docs\) — 받은 커밋 ${SHA:0:12} ≠ ref ${SHA2:0:12}" "$W/sha3c.out"
+expect_eq "--check 는 쓰지 않음(기록 그대로)" "$SHA" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
+(cd "$W/sha-docs" && python3 .mawf/engine_sync) > "$W/sha3.out" 2>&1; show "$W/sha3.out"
+expect_eq "sha 바꾸면 다시 받아 기록 갱신" "$SHA2" "$(cat "$W/sha-docs/.mawf/ENGINE_REF" 2>/dev/null)"
+expect_grep "sha 바꾼 갱신 — 바뀐 파일에 .mawf/ENGINE_REF" '갱신 — 바뀐 파일 .*\.mawf/ENGINE_REF' "$W/sha3.out"
+# 태그 ref 는 지금 그대로 — 버전 비교(같으면 네트워크 없이 「변경 없음」)
+manifest "$W/sha-docs" "$W/eng-bare.git" "v$V" docs 'roles: {mode: open-channel}'
+(cd "$W/sha-docs" && python3 .mawf/engine_sync) > "$W/sha4.out" 2>&1; show "$W/sha4.out"
+expect_grep "태그 ref(v$V) — 버전이 같으면 「변경 없음」" "매니페스트 ref v$V 와 같음, 변경 없음" "$W/sha4.out"
 finish
