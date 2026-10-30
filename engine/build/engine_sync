@@ -10,7 +10,7 @@
   engine_sync --runner-cfg [키]   작업자 실행기 설정(token_secret·node·git_name·git_email) — 매니페스트 runner.* > 어댑터 adapter.yaml > 기본값.
                            키를 주면 그 값만, 없으면 「키=값」 줄들(하니스가 GITHUB_OUTPUT 에 붙인다)
 첫 동기화(엔진이 아직 없는 저장소): 그 저장소 폴더에서 python3 <엔진 checkout>/engine/build/engine_sync
-환경: MAWF_ROOT(적용할 저장소, 기본 위 규칙) · MAWF_SYNC_TIMEOUT(가져오기 상한 초, 기본 25) · MAWF_ENGINE_SRC(이미 받아 둔 엔진 checkout — 가져오기 생략) · MAWF_NO_PYYAML=1(내장 해석기 강제, 시험용)
+환경: MAWF_ROOT(적용할 저장소, 기본 위 규칙) · MAWF_SYNC_TIMEOUT(가져오기 상한 초, 기본 25) · MAWF_ENGINE_SRC(이미 받아 둔 엔진 checkout — 원격 가져오기 생략. 해시 ref 면 그 checkout 에서 그 커밋만 꺼낸다) · MAWF_NO_PYYAML=1(내장 해석기 강제, 시험용)
 출력 첫 줄: 역할표가 없거나 비면 「역할 미정 — 사용자와 역할표 확정 필요 …」. 실패해도 종료코드 0(--roles 제외) — 세션·하니스를 멈추지 않는다."""
 from __future__ import annotations
 import hashlib, os, re, shutil, subprocess, sys, tempfile, time

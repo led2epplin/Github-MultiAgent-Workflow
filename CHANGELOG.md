@@ -4,8 +4,12 @@
 태그 없이 엔진 판 고정(ORDER-33) — 이 환경에서 태그 push·Releases API 가 막혀 매번 사용자가 웹에서 태그를 만들어야 했다.
 - `engine.ref` 가 40자 커밋 해시면 `engine_sync` 가 `git clone --branch` 대신 `git init` + `git fetch --depth 1 <원격> <sha>` + `checkout FETCH_HEAD` 로 받는다. 받은 커밋을 확인해 `.mawf/ENGINE_REF` 에 적고, 다음 실행은 이것과 비교해 같으면 네트워크 없이 「변경 없음」. 갱신 안내의 버전은 그 판의 `ENGINE_VERSION`.
 - 태그·브랜치 ref 는 그대로(엔진 버전 비교). 태그·브랜치로 다시 받으면 옛 `.mawf/ENGINE_REF` 는 지운다.
-- PR #2 교차 검수(Codex P2 2건): 받은 판이 그 커밋인지 확인하지 못하면(git 이 아닌 사본·`MAWF_ENGINE_SRC` 가 다른 커밋·다른 저장소 안의 폴더) 적용하지 않고 기존 파일 그대로. `ENGINE_REF` 는 「해시 모드」 한 줄 — full·docs 가 갱신하는 파일이 달라 다른 모드로 받은 기록은 최신으로 치지 않는다.
-- `tests/test_sync.sh` §6 — 로컬 bare 원격에서 해시 ref 동기화(docs·full) · 같은 해시 재실행(원격 치움)은 「변경 없음」 · `--check` · 해시 바꾸면 다시 받음 · 태그 ref 는 기존대로. §7 확인 못 한 판 거절 · §8 full(A) → docs(B) → full(B).
+- PR #2 교차 검수(Codex) 결함 — 티켓 + TC:
+  - D-0006 full·docs 가 같은 `ENGINE_REF` 를 써 full 파일 미갱신 → `ENGINE_REF` = 「<해시> <모드>」, 다른 모드 기록은 최신 아님.
+  - D-0007 커밋을 확인할 수 없는 소스(git 이 아닌 사본·다른 저장소 안의 폴더)를 적용 → 받은 판의 커밋 = ref 일 때만 적용, 아니면 「동기화 실패 … 기존 파일 그대로」.
+  - D-0008 해시 고정인데 `MAWF_ENGINE_SRC` checkout 의 미커밋 변경을 설치 → 그 checkout 에서 커밋만 로컬 fetch 해 적용(작업 트리·HEAD 무관).
+  - D-0009 경로에 공백이 있으면 정상 checkout 을 거절 → 저장소 뿌리와 HEAD 를 따로 조회.
+- `tests/test_sync.sh` §6 — 로컬 bare 원격에서 해시 ref 동기화(docs·full) · 같은 해시 재실행(원격 치움)은 「변경 없음」 · `--check` · 해시 바꾸면 다시 받음 · 태그 ref 는 기존대로. §7 확인 못 한 판 거절 · §8 full(A) → docs(B) → full(B). run_all 14개(D-0001~0009 + 시험 5) 실패 0.
 
 ## 1.1.1 (2026-10-30)
 교차 검수(ORDER-30) P0 3건 — 결함 티켓 + TC(고치기 전 실패 · 고친 뒤 통과).
